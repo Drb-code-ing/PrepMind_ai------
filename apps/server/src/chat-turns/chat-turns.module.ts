@@ -4,6 +4,7 @@ import { BackgroundJobsModule } from '../background-jobs/background-jobs.module'
 import { AuthModule } from '../auth/auth.module';
 import { ConfigModule as AppConfigModule } from '../config/config.module';
 import { DatabaseModule } from '../database/database.module';
+import { KnowledgeDocumentsModule } from '../knowledge-documents/knowledge-documents.module';
 import { ChatRunBudgetModule } from '../chat-run-budget/chat-run-budget.module';
 import type { ServerEnv } from '../config/env';
 import { shouldRegisterWorkers } from '../jobs/worker-role';
@@ -31,6 +32,7 @@ import { ChatTurnEnqueueService } from './chat-turn-enqueue.service';
 import { ChatTurnsRepository } from './chat-turns.repository';
 import { ChatRunBudgetRepository } from '../chat-run-budget/chat-run-budget.repository';
 import { ChatRunBudgetStageRunner } from './chat-run-budget-stage-runner';
+import { ChatRetrieverStageService } from './chat-retriever-stage';
 
 export function createChatResponseWorkerProviders(
   role: ServerEnv['SERVER_ROLE'],
@@ -51,6 +53,7 @@ const chatResponseWorkerProviders = createChatResponseWorkerProviders(
     DatabaseModule,
     OutboxModule,
     ChatResponseQueueModule,
+    KnowledgeDocumentsModule,
   ],
   controllers: [ChatTurnsController],
   providers: [
@@ -76,6 +79,7 @@ const chatResponseWorkerProviders = createChatResponseWorkerProviders(
     ChatResponseWorkerService,
     ChatRunBudgetStageRunner,
     ChatRouterStageService,
+    ChatRetrieverStageService,
     {
       provide: CHAT_ROUTER_RUNTIME,
       inject: [ConfigService],

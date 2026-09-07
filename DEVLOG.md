@@ -27,6 +27,14 @@
 > 因此不创建空数组或 no-op Verifier wrapper，不把它宣称为产品接入。下一原子任务调整为先迁移 Server Retriever projection，再接 Verifier model candidate；该调整符合
 > ChatRunBudget 设计的 Router -> Retriever -> Verifier 顺序。未读取凭据、未调用 Provider、未触碰 Docker/Redis/MinIO。
 
+> 2026-09-07 — Ticket 05 Retriever projection 原子切片：
+>
+> 新增 `ChatRetrieverStageService`，复用 `KnowledgeSearchService` 的 owner-bound SQL 结果，将 hybrid hits 映射为严格的 `KnowledgeVerifierChunk`；请求固定
+> `topK=4`、`minScore=0.7`，取消、搜索异常和 provider 不可用均 fail-closed 为 degraded 空投影。该服务已注册到 ChatTurnsModule，但尚未在 Worker RAG 路径调用，
+> 因此不宣称 Retriever 产品接入或 Verifier 完成。
+>
+> Retriever focused tests `2/2`、module tests `9/9`、Server/Web build 通过；未读取凭据、未调用 Provider、未触碰项目 Docker/Redis/MinIO。
+
 > 2026-09-07 — Ticket 05 隔离 PostgreSQL recovery 证据：
 >
 > Docker Desktop 恢复后执行 `bun --no-env-file apps/server/scripts/chat-run-budget-postgres-check.ts --run-isolated`，临时 tmpfs PostgreSQL 应用 20 个 migration，同机两个独立 PrismaClient 的跨 stage 上限、single dispatch winner、owner isolation、cancel race、active-turn guard、reserve crash replay、dispatch crash held 和 recovery settle-once 共 8 项检查全部通过（`passed=true`）。临时容器已停止并丢弃 tmpfs；项目容器、卷、Redis、MinIO 未触碰，未读取 `.env` 或调用 Provider。该回执补齐 Ticket 05 的真实数据库并发与子进程 post-commit crash/reconciliation 证据，但不覆盖多 Worker/跨主机/网络中断，也不证明真实模型或生产持续运行。

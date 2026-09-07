@@ -76,7 +76,7 @@ bun --no-env-file apps/server/scripts/chat-run-budget-postgres-check.ts --run-is
 这次已完成合同、数据库结构和最小运行时接入，但不代表已完成生产级全链路预算。后续 ticket 05 切片必须实现：
 
 1. 补多 Worker/跨主机、网络中断和数据库故障恢复证据；现有证据仅覆盖同机多 PrismaClient 竞争和子进程 post-commit 恢复。
-2. 扩展 Retriever/Verifier/Tutor/FinalResponse 的 Agent stage 接入，顺序上先让 Server 产生 owner-bound、状态受限的 Retriever chunks，再将真实 chunks 交给 Verifier；复用 Server turn-bound runner，结算真实 usage/cost，并与 terminal Outbox、Redis stream、Trace 做 bounded reconciliation。Router 仍需独立产品 smoke。
+2. 扩展 Retriever/Verifier/Tutor/FinalResponse 的 Agent stage 接入。Server 已完成 owner-bound Retriever projection，但仍需接入 Worker RAG 路径并验证 embedding/provider；随后再将真实 chunks 交给 Verifier。复用 Server turn-bound runner，结算真实 usage/cost，并与 terminal Outbox、Redis stream、Trace 做 bounded reconciliation。Router 仍需独立产品 smoke。
    对 UNCERTAIN 仅允许带外部 usage 证据的显式 `settleUncertain`，不提供无证据释放路径。
 3. 除 Router stage 外，产品 Agent 编排仍在 Web；先将 Retriever 的 owner/auth projection 解耦并迁入 Server composition，再迁移 Verifier，不能用空 chunks 或只有测试调用的
    wrapper 宣称接入完成。默认仍保持 mock/off，真实模型 Worker 属于 ticket 06，需独立受控证据。
