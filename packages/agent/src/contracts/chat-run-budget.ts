@@ -32,6 +32,21 @@ export type BudgetTransition =
   | { kind: 'conflict'; reservation: ChatRunBudgetReservation }
   | { kind: 'updated'; reservation: ChatRunBudgetReservation };
 
+/** A dispatch conflict after a durable attempt must never execute the stage again. */
+export class AgentBudgetDispatchError extends Error {
+  constructor() {
+    super('Agent stage budget reservation was already dispatched');
+    this.name = 'AgentBudgetDispatchError';
+  }
+}
+
+export class AgentBudgetAdmissionError extends Error {
+  constructor() {
+    super('Agent stage budget reservation could not be dispatched');
+    this.name = 'AgentBudgetAdmissionError';
+  }
+}
+
 export type BudgetedStageInput = Omit<ChatRunBudgetReservationRequest, 'stage'> & {
   stage: ChatRunBudgetStage;
 };
@@ -51,7 +66,13 @@ export async function runBudgetedStage<T>(
     if (dispatched.kind === 'conflict' && dispatched.reservation.status === 'RESERVED') {
       await budget.release(input.ownerId, reservation.id);
     }
-    throw new Error('Agent stage budget reservation could not be dispatched');
+    if (
+      dispatched.kind === 'conflict' &&
+      ['DISPATCHED', 'UNCERTAIN', 'SETTLED'].includes(dispatched.reservation.status)
+    ) {
+      throw new AgentBudgetDispatchError();
+    }
+    throw new AgentBudgetAdmissionError();
   }
 
   try {

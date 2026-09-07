@@ -1,5 +1,17 @@
 # PrepMind AI 开发日志
 
+> 2026-09-07 — Ticket 05 Server turn-bound stage runner 原子切片：
+>
+> 从 `main=d3fe9827` 建立 `drb/chat-budget-stage-runner`。新增 `ChatRunBudgetStageRunner`，由 Server 固定 owner、turn、policy、attempt，
+> Worker 实际复用 `@repo/agent` 的 `runBudgetedStage`，移除手写 reserve/dispatch/settle；Prisma 返回值显式映射并校验共享合同。
+> 缺账本不再绕过预算生成，settlement 冲突不再被忽略，非法输出先拒绝再结算，重复 dispatch 不改写胜者事实。
+>
+> Server StageRunner/Worker/module focused `41/41`、Agent 全量 `1703/1703`、Agent typecheck、Server/Web build 和目标 lint/Prettier 通过。
+> `bun --no-env-file apps/server/scripts/chat-run-budget-postgres-check.ts --run-isolated` 当前 `10/10`：新增两项验证 synthetic ROUTER/VERIFIER
+> stage 共用一个真实 ledger，竞争仅执行一次、成本结算为 60 micros，并拒绝已结算 stage 重复执行。临时 tmpfs 容器已停止；不改项目卷、Redis、MinIO。
+> 未查看或输出凭据、未调用 Provider；Next build 自动加载已有 `.env.local`。产品 Agent 尚未迁入 Server，WORKER 仍为 deterministic，
+> scope 仅供受信编排使用且每 stage/turn/attempt 一个 reservation。接下来先解耦并迁入 Agent 执行，再分配 stage 预算及接 Trace；细节见合同验收 3.1。
+
 > 2026-09-07 — Ticket 05 隔离 PostgreSQL recovery 证据：
 >
 > Docker Desktop 恢复后执行 `bun --no-env-file apps/server/scripts/chat-run-budget-postgres-check.ts --run-isolated`，临时 tmpfs PostgreSQL 应用 20 个 migration，同机两个独立 PrismaClient 的跨 stage 上限、single dispatch winner、owner isolation、cancel race、active-turn guard、reserve crash replay、dispatch crash held 和 recovery settle-once 共 8 项检查全部通过（`passed=true`）。临时容器已停止并丢弃 tmpfs；项目容器、卷、Redis、MinIO 未触碰，未读取 `.env` 或调用 Provider。该回执补齐 Ticket 05 的真实数据库并发与子进程 post-commit crash/reconciliation 证据，但不覆盖多 Worker/跨主机/网络中断，也不证明真实模型或生产持续运行。

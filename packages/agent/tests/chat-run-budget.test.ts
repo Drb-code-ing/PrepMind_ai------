@@ -1,6 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
 
-import { runBudgetedStage, type AgentBudgetPort } from '../src/contracts/chat-run-budget';
+import {
+  AgentBudgetDispatchError,
+  runBudgetedStage,
+  type AgentBudgetPort,
+} from '../src/contracts/chat-run-budget';
 
 function makeBudget(overrides: Partial<AgentBudgetPort> = {}) {
   const reservation = { id: 'reservation_1' } as never;
@@ -34,8 +38,8 @@ describe('runBudgetedStage', () => {
       dispatch: async () => ({ kind: 'conflict', reservation: { status: 'DISPATCHED' } as never }),
       release,
     });
-    await expect(runBudgetedStage(budget, input, execute)).rejects.toThrow(
-      'could not be dispatched',
+    await expect(runBudgetedStage(budget, input, execute)).rejects.toBeInstanceOf(
+      AgentBudgetDispatchError,
     );
     expect(execute).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();

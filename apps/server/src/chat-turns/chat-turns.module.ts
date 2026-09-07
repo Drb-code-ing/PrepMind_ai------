@@ -25,6 +25,7 @@ import {
 import { ChatTurnEnqueueService } from './chat-turn-enqueue.service';
 import { ChatTurnsRepository } from './chat-turns.repository';
 import { ChatRunBudgetRepository } from '../chat-run-budget/chat-run-budget.repository';
+import { ChatRunBudgetStageRunner } from './chat-run-budget-stage-runner';
 
 export function createChatResponseWorkerProviders(
   role: ServerEnv['SERVER_ROLE'],
@@ -68,6 +69,7 @@ const chatResponseWorkerProviders = createChatResponseWorkerProviders(
     ChatTurnEnqueueService,
     ChatTurnsQueryService,
     ChatResponseWorkerService,
+    ChatRunBudgetStageRunner,
     DeterministicChatResponseGenerator,
     {
       provide: CHAT_RESPONSE_GENERATOR,

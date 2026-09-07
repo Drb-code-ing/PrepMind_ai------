@@ -115,8 +115,9 @@ HTTP request
    已接 admission/handoff，浏览器 status/JSON replay 与断线恢复也已接入。真正 SSE push 仍未实现，但不作为 ticket 04 完成条件。
 5. Review/Planner 的 HTTP AbortSignal 与 candidate 外层 fallback 已完成；共享预算 repository、Worker reservation/settlement 和 terminal
    reconciliation 已建立，但 Review/Planner 真实模型产品验收仍未建立。
-6. Router/Verifier/Tutor/FinalResponse 各自持有局部预算；`@repo/agent` 现在提供 typed `AgentBudgetPort/runBudgetedStage`，但产品 composition
-   root 尚未注入，因此仍需补跨节点上限、Trace 对账和越界测试，不能把 port 合同当成产品 enforcement。
+6. Router/Verifier/Tutor/FinalResponse 各自持有局部预算；`@repo/agent` 现在提供 typed `AgentBudgetPort/runBudgetedStage`，Server 也提供 turn-bound
+   `ChatRunBudgetStageRunner` 并已由 Worker 使用，但产品 composition root 尚未将 Router/Tutor/Retriever/Verifier/FinalResponse 注入，因此仍需
+   补跨节点上限、Trace 对账和越界测试，不能把 runner/port 合同当成所有产品 Agent 的 enforcement。
 7. `POST /chat-turns`、Web adapter、`/api/chat` bridge 和 browser recovery 都已实现；`202` 仍只表示 Worker 已接管，浏览器必须继续
    通过 authenticated status/JSON replay 取得结果。不得把该 polling consumer 误读为 SSE push 或 Provider 成功。
 

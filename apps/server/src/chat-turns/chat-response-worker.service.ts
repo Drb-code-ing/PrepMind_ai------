@@ -28,6 +28,14 @@ import { resolveChatResponseGenerationTimeout } from './chat-response-worker.con
 import { PrismaService } from '../database/prisma.service';
 import { ChatRunBudgetRepository } from '../chat-run-budget/chat-run-budget.repository';
 import { ChatStreamStore } from './chat-stream.store';
+import {
+  ChatRunBudgetStageRunner,
+  ChatRunBudgetUnavailableError,
+} from './chat-run-budget-stage-runner';
+import {
+  AgentBudgetAdmissionError,
+  AgentBudgetDispatchError,
+} from '@repo/agent/chat-run-budget';
 
 export const CHAT_RESPONSE_GENERATOR = Symbol('CHAT_RESPONSE_GENERATOR');
 
@@ -112,8 +120,6 @@ const CHAT_RESPONSE_WORKER_VERSION = 'chat-response-worker-v1';
 const MAX_SERIALIZABLE_ATTEMPTS = 3;
 const INPUT_CONTENT_MAX_LENGTH = 100_000;
 
-class ChatResponseBudgetAlreadyDispatchedError extends Error {}
-
 @Injectable()
 export class ChatResponseWorkerService {
   constructor(
@@ -122,6 +128,7 @@ export class ChatResponseWorkerService {
     private readonly generator: ChatResponseGenerator,
     @Optional() private readonly streams?: ChatStreamStore,
     @Optional() private readonly budgets?: ChatRunBudgetRepository,
+    @Optional() private readonly budgetRunner?: ChatRunBudgetStageRunner,
   ) {}
 
   async process(job: Job<unknown>): Promise<void> {
@@ -142,35 +149,23 @@ export class ChatResponseWorkerService {
 
     await this.publishStarted(claim.claim.turn);
     let generatedTextObserved = false;
-    let workerReservationId: string | null = null;
     let terminalCommitted = false;
     try {
       const messages = await this.loadInputMessages(claim.claim.turn);
-      workerReservationId = await this.reserveWorkerBudget(
-        claim.claim.turn,
-        messages,
-        attemptNumber(job),
-      );
-      const generated = await this.generate(claim.claim.turn, messages);
+      let generated: ChatResponseGeneratorResult;
+      if (this.budgetRunner) {
+        generated = await this.runBudgetedGeneration(
+          claim.claim.turn,
+          messages,
+          attemptNumber(job),
+        );
+      } else {
+        if (this.budgets) throw new ChatRunBudgetUnavailableError();
+        generated = await this.generate(claim.claim.turn, messages);
+      }
       validateGeneratedResult(generated);
       generatedTextObserved = generated.content.length > 0;
       await this.publishTextDelta(claim.claim.turn, generated.content);
-      if (workerReservationId) {
-        await this.budgets?.settle(
-          claim.claim.turn.userId,
-          workerReservationId,
-          {
-            inputTokens: Math.min(
-              10_000,
-              estimateTokens(
-                messages.map((message) => message.content).join('\n'),
-              ),
-            ),
-            outputTokens: Math.min(2_800, estimateTokens(generated.content)),
-            costMicros: 0,
-          },
-        );
-      }
       await this.commitSuccess(payload, claim.claim, generated, bullJobId);
       terminalCommitted = true;
       await this.budgets?.reconcileTerminal(
@@ -184,21 +179,8 @@ export class ChatResponseWorkerService {
       );
     } catch (error) {
       // Publication/reconciliation retries and losing deliveries must not rewrite job facts.
-      if (
-        terminalCommitted ||
-        error instanceof ChatResponseBudgetAlreadyDispatchedError
-      ) {
+      if (terminalCommitted || error instanceof AgentBudgetDispatchError) {
         throw error;
-      }
-      if (workerReservationId && this.budgets) {
-        try {
-          await this.budgets.uncertain(
-            claim.claim.turn.userId,
-            workerReservationId,
-          );
-        } catch {
-          // Preserve the original worker failure; reconciliation can inspect the reservation.
-        }
       }
       const decision = await this.handleFailure(
         payload,
@@ -237,48 +219,45 @@ export class ChatResponseWorkerService {
     }
   }
 
-  private async reserveWorkerBudget(
+  private async runBudgetedGeneration(
     turn: ChatTurn,
     messages: readonly ChatResponseInputMessage[],
     attempt: number,
-  ): Promise<string | null> {
-    if (!this.budgets) return null;
-    const ledger = await this.budgets.findLedger(turn.userId, turn.id);
-    if (!ledger) return null;
-    const reservationId = `worker:${turn.id}:${attempt}`;
-    const reservation = await this.budgets.reserve({
-      ownerId: turn.userId,
-      turnId: turn.id,
-      ledgerId: ledger.id,
-      reservationId,
-      stage: 'WORKER',
-      inputTokens: Math.min(
-        ledger.maxInputTokens,
-        estimateTokens(messages.map((message) => message.content).join('\n')),
-      ),
-      outputTokens: Math.min(ledger.maxOutputTokens, 2_800),
-      costMicros: Math.min(ledger.maxCostMicros, 100_000),
-    });
-    const dispatched = await this.budgets.dispatch(turn.userId, reservation.id);
-    if (dispatched.kind !== 'updated') {
-      if (
-        dispatched.kind === 'conflict' &&
-        ['DISPATCHED', 'UNCERTAIN', 'SETTLED'].includes(
-          dispatched.reservation.status,
-        )
-      ) {
-        throw new ChatResponseBudgetAlreadyDispatchedError(
-          'Chat response worker budget already dispatched',
-        );
-      }
-      await this.budgets.release(turn.userId, reservation.id);
-      throw new ChatResponseWorkerError(
-        'BUDGET_EXHAUSTED',
-        false,
-        'Chat response worker budget reservation could not be dispatched',
-      );
-    }
-    return reservation.id;
+  ): Promise<ChatResponseGeneratorResult> {
+    const scope = await this.budgetRunner!.forTurn(
+      turn.userId,
+      turn.id,
+      turn.budgetPolicyVersion,
+      attempt,
+    );
+    return scope.run(
+      'WORKER',
+      {
+        inputTokens: Math.min(
+          scope.limits.maxInputTokens,
+          estimateTokens(messages.map((message) => message.content).join('\n')),
+        ),
+        outputTokens: Math.min(scope.limits.maxOutputTokens, 2_800),
+        costMicros: Math.min(scope.limits.maxCostMicros, 100_000),
+      },
+      async () => {
+        const value = await this.generate(turn, messages);
+        validateGeneratedResult(value);
+        return {
+          value,
+          usage: {
+            inputTokens: Math.min(
+              10_000,
+              estimateTokens(
+                messages.map((message) => message.content).join('\n'),
+              ),
+            ),
+            outputTokens: Math.min(2_800, estimateTokens(value.content)),
+            costMicros: 0,
+          },
+        };
+      },
+    );
   }
 
   private async publishStarted(turn: ChatTurn) {
@@ -1050,6 +1029,12 @@ function validateGeneratedResult(result: ChatResponseGeneratorResult) {
 }
 
 function classifyFailure(error: unknown) {
+  if (
+    error instanceof ChatRunBudgetUnavailableError ||
+    error instanceof AgentBudgetAdmissionError
+  ) {
+    return { code: 'BUDGET_EXHAUSTED' as const, retryable: false };
+  }
   if (error instanceof ChatResponseWorkerError) {
     return { code: error.code, retryable: error.retryable };
   }
