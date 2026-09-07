@@ -8,6 +8,7 @@ import { PrismaClient } from '@prisma/client';
 import type { ChatRunBudgetReservationRequest } from '@repo/types';
 
 import { ChatRunBudgetRepository } from '../src/chat-run-budget/chat-run-budget.repository';
+import { ChatRunBudgetStageRunner } from '../src/chat-turns/chat-run-budget-stage-runner';
 import type { PrismaService } from '../src/database/prisma.service';
 
 const fixtureName = 'chat_budget_test';
@@ -208,6 +209,56 @@ async function checkIsolatedPostgres() {
     );
     assert.equal((await first.findLedger(ownerId, cap.turnId))?.heldCalls, 1);
 
+    const stageFixture = await fixture(1);
+    const scopes = await Promise.all(
+      [first, second].map((budget) =>
+        new ChatRunBudgetStageRunner(budget).forTurn(
+          ownerId,
+          stageFixture.turnId,
+          'chat-v1',
+          1,
+        ),
+      ),
+    );
+    const stages = ['ROUTER', 'VERIFIER'] as const;
+    const reservation = {
+      inputTokens: 100,
+      outputTokens: 100,
+      costMicros: 100,
+    };
+    let executions = 0;
+    const execute = async () => {
+      executions += 1;
+      return {
+        value: 'synthetic',
+        usage: { inputTokens: 80, outputTokens: 70, costMicros: 60 },
+      };
+    };
+    const results = await Promise.allSettled(
+      stages.map((stage, index) =>
+        scopes[index].run(stage, reservation, execute),
+      ),
+    );
+    assert.equal(
+      results.filter((result) => result.status === 'fulfilled').length,
+      1,
+    );
+    assert.equal(
+      results.filter((result) => result.status === 'rejected').length,
+      1,
+    );
+    assert.equal(executions, 1);
+    const stageLedger = await first.findLedger(ownerId, stageFixture.turnId);
+    assert.equal(stageLedger?.usedCalls, 1);
+    assert.equal(stageLedger?.heldCalls, 0);
+    assert.equal(stageLedger?.usedCostMicros, 60);
+    const winner = results.findIndex((result) => result.status === 'fulfilled');
+    await assert.rejects(
+      scopes[winner].run(stages[winner], reservation, execute),
+      /already dispatched/,
+    );
+    assert.equal(executions, 1);
+
     const duplicate = await fixture();
     await Promise.all([first.reserve(duplicate), second.reserve(duplicate)]);
     const permits = await Promise.all([
@@ -353,6 +404,8 @@ async function checkIsolatedPostgres() {
         providerCalls: 0,
         checks: [
           'cross-stage-cap',
+          'stage-runner-shared-cap',
+          'stage-runner-duplicate-no-execute',
           'single-dispatch-winner',
           'owner-isolation',
           'cancel-race',

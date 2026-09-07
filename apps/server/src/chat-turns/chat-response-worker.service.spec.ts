@@ -17,6 +17,7 @@ import {
   type ChatResponseGeneratorResult,
 } from './chat-response-worker.service';
 import type { ChatStreamStore } from './chat-stream.store';
+import { ChatRunBudgetStageRunner } from './chat-run-budget-stage-runner';
 
 describe('ChatResponseWorkerService', () => {
   const payload = {
@@ -61,6 +62,76 @@ describe('ChatResponseWorkerService', () => {
       expect.objectContaining({ costMicros: 0 }),
     );
     expect(budget.uncertain).not.toHaveBeenCalled();
+  });
+
+  it('fails closed rather than generating without a missing durable ledger', async () => {
+    const budget = createBudgetMock();
+    budget.findLedger.mockResolvedValueOnce(null);
+    const harness = createHarness(undefined, undefined, budget);
+    await harness.service.process(createJob());
+    expect(harness.generator.generate).not.toHaveBeenCalled();
+    expect(harness.state.turn.status).toBe('FAILED');
+    expect(harness.state.turn.errorCode).toBe('BUDGET_EXHAUSTED');
+  });
+
+  it('keeps an undispatched budget conflict non-retryable', async () => {
+    const budget = createBudgetMock();
+    budget.dispatch.mockResolvedValueOnce({
+      kind: 'conflict',
+      reservation: budgetReservation('RESERVED'),
+    });
+    const harness = createHarness(undefined, undefined, budget);
+    const job = createJob();
+    await harness.service.process(job);
+    expect(harness.generator.generate).not.toHaveBeenCalled();
+    expect(harness.state.turn.errorCode).toBe('BUDGET_EXHAUSTED');
+    expect(job.discard).toHaveBeenCalledTimes(1);
+    expect(budget.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('records generation failure as uncertain through the shared port', async () => {
+    const budget = createBudgetMock();
+    const error = new ChatResponseWorkerError(
+      'GENERATION_ABORTED',
+      true,
+      'aborted',
+    );
+    const harness = createHarness(error, undefined, budget);
+    await expect(harness.service.process(createJob())).rejects.toBe(error);
+    expect(budget.uncertain).toHaveBeenCalledWith('user_1', 'worker:turn_1:1');
+    expect(budget.release).not.toHaveBeenCalled();
+    expect(budget.settle).not.toHaveBeenCalled();
+  });
+
+  it('does not publish or commit an answer after settlement conflict', async () => {
+    const budget = createBudgetMock();
+    budget.settle.mockResolvedValueOnce({
+      kind: 'conflict',
+      reservation: budgetReservation('UNCERTAIN'),
+    });
+    const stream = createStreamMock();
+    const harness = createHarness(undefined, stream, budget);
+    await harness.service.process(createJob(2));
+    expect(harness.state.turn.status).toBe('FAILED');
+    expect(harness.state.messages).toHaveLength(1);
+    expect(budget.uncertain).toHaveBeenCalledTimes(1);
+    expect(stream.append.mock.calls.map((call) => call[2]?.type)).toEqual([
+      'response_started',
+      'response_failed',
+    ]);
+  });
+
+  it('rejects invalid generator output before budget settlement', async () => {
+    const budget = createBudgetMock();
+    const harness = createHarness(undefined, undefined, budget);
+    harness.generator.generate.mockResolvedValueOnce({
+      content: '',
+      generator: 'test',
+    });
+    await harness.service.process(createJob());
+    expect(harness.state.turn.errorCode).toBe('OUTPUT_INVALID');
+    expect(budget.settle).not.toHaveBeenCalled();
+    expect(budget.uncertain).toHaveBeenCalledTimes(1);
   });
 
   it('publishes ordered non-terminal events and only then publishes the terminal event', async () => {
@@ -150,10 +221,13 @@ describe('ChatResponseWorkerService', () => {
       return finish.promise;
     });
     budget.dispatch
-      .mockResolvedValueOnce({ kind: 'updated' })
+      .mockResolvedValueOnce({
+        kind: 'updated',
+        reservation: budgetReservation('DISPATCHED'),
+      })
       .mockResolvedValue({
         kind: 'conflict',
-        reservation: { status: 'DISPATCHED' },
+        reservation: budgetReservation('DISPATCHED'),
       });
     const winning = harness.service.process(createJob());
     try {
@@ -430,6 +504,7 @@ describe('ChatResponseWorkerService', () => {
       generator,
       stream as never,
       budget as never,
+      budget ? new ChatRunBudgetStageRunner(budget as never) : undefined,
     );
     return {
       service,
@@ -453,16 +528,57 @@ describe('ChatResponseWorkerService', () => {
     return {
       findLedger: jest.fn().mockResolvedValue({
         id: 'ledger_1',
+        userId: 'user_1',
+        turnId: payload.turnId,
+        policyVersion: payload.budgetPolicyVersion,
+        cancelledAt: null,
+        maxCalls: 5,
         maxInputTokens: 10_000,
         maxOutputTokens: 2_800,
         maxCostMicros: 100_000,
       }),
-      reserve: jest.fn().mockResolvedValue({ id: 'reservation_1' }),
-      dispatch: jest.fn().mockResolvedValue({ kind: 'updated' }),
-      settle: jest.fn().mockResolvedValue({ kind: 'updated' }),
-      uncertain: jest.fn().mockResolvedValue({ kind: 'updated' }),
-      release: jest.fn().mockResolvedValue({ kind: 'updated' }),
+      reserve: jest.fn().mockResolvedValue(budgetReservation('RESERVED')),
+      dispatch: jest.fn().mockResolvedValue({
+        kind: 'updated',
+        reservation: budgetReservation('DISPATCHED'),
+      }),
+      settle: jest.fn().mockResolvedValue({
+        kind: 'updated',
+        reservation: budgetReservation('SETTLED'),
+      }),
+      uncertain: jest.fn().mockResolvedValue({
+        kind: 'updated',
+        reservation: budgetReservation('UNCERTAIN'),
+      }),
+      release: jest.fn().mockResolvedValue({
+        kind: 'updated',
+        reservation: budgetReservation('RELEASED'),
+      }),
       reconcileTerminal: jest.fn().mockResolvedValue(null),
+    };
+  }
+
+  function budgetReservation(
+    status: 'RESERVED' | 'DISPATCHED' | 'SETTLED' | 'UNCERTAIN' | 'RELEASED',
+  ) {
+    const now = new Date('2026-08-28T00:00:03.000Z');
+    return {
+      id: 'worker:turn_1:1',
+      userId: 'user_1',
+      turnId: 'turn_1',
+      ledgerId: 'ledger_1',
+      stage: 'WORKER',
+      status,
+      inputTokens: 10_000,
+      outputTokens: 2_800,
+      costMicros: 100_000,
+      usageInputTokens: 0,
+      usageOutputTokens: 0,
+      usageCostMicros: 0,
+      createdAt: now,
+      dispatchedAt: status === 'RESERVED' || status === 'RELEASED' ? null : now,
+      settledAt: status === 'SETTLED' ? now : null,
+      releasedAt: status === 'RELEASED' ? now : null,
     };
   }
 

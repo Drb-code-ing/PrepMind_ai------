@@ -73,7 +73,8 @@ checkpoint 已增加独立 Redis Stream transport，但它仍不是 durable auth
 
 ## 4. 全链路预算合同
 
-当前 Router/Verifier、Tutor、FinalResponse 各自拥有局部 budget。已先冻结共享 run-level ledger 合同，下一实现仍需创建其持久化账本：
+当前 Router/Verifier、Tutor、FinalResponse 各自拥有局部 budget。共享 run-level ledger 已持久化，Worker 已通过 Server turn-bound runner
+消费 `AgentBudgetPort`；下一步是将产品 Agent 执行与 Web 配置/HTTP 依赖解耦后迁入 Server，不能另造 Web 进程内账本：
 
 ```text
 ChatRunBudget {
@@ -129,5 +130,5 @@ reservation 的 `RESERVED -> DISPATCHED -> SETTLED|UNCERTAIN` 与未 dispatch �
 - “BackgroundJob + Outbox 同事务”与 Worker durable terminal commit 已实现；gate-on `/api/chat` handoff 和浏览器 JSON status/replay
   已接入，真正 SSE push 尚未实现。
 - 当前 Worker 的生成器是 `deterministic-worker-v1`，只证明执行与持久化骨架，不证明真实模型或语义质量。
-- 本 checkpoint 已增加 runtime repository、Worker `WORKER` reservation 和终态对未 dispatch reservation 的释放；真实 PostgreSQL 同机多 client
+- 本 checkpoint 已增加 runtime repository、Server turn-bound runner、Worker `WORKER` reservation 和终态对未 dispatch reservation 的释放；真实 PostgreSQL 同机多 client
   并发及子进程 post-commit recovery 已有脚本回执；完整 Trace reconciliation、跨节点/网络故障证据和其他 Agent stage 仍未完成。
