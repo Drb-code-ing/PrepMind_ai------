@@ -11,7 +11,10 @@ describe('ChatRetrieverStageService', () => {
             chunkId: 'chunk-1',
             content: '矩阵的秩等于最大线性无关组所含向量个数。',
             score: 0.91,
-            metadata: { safety: { riskLevel: 'low' } },
+            metadata: {
+              page: 3,
+              safety: { riskLevel: 'low' },
+            },
           },
         ],
       }),

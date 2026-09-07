@@ -37,7 +37,13 @@ export class ChatRetrieverStageService {
           chunkId: hit.chunkId,
           content: hit.content,
           score: hit.score,
-          metadata: hit.metadata,
+          ...(hit.metadata.safety
+            ? {
+                metadata: {
+                  safety: hit.metadata.safety,
+                },
+              }
+            : {}),
         })),
         degraded: false,
       };
