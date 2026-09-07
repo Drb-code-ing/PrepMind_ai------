@@ -1,7 +1,7 @@
 # Phase 6 ChatRunBudget 合同验收
 
 更新时间：2026-09-07
-状态：共享类型、Prisma schema/migration、owner-scoped repository、deterministic Worker 预留/结算、终态对账与单 ledger 并发边界已实现；隔离 PostgreSQL crash/recovery 脚本已加入但因 Docker Desktop backend 当前不可用尚未执行。Trace 对账、产品 Agent stage 注入和真实模型验收仍未实现。
+状态：共享类型、Prisma schema/migration、owner-scoped repository、deterministic Worker 预留/结算、终态对账与单 ledger 并发边界已实现；隔离 PostgreSQL crash/recovery 验收已通过。Trace 对账、产品 Agent stage 注入和真实模型验收仍未实现。
 
 ## 1. 目的
 
@@ -39,17 +39,18 @@ Prettier: passed
 追加验证：`apps/server` ChatRunBudget/Worker focused Jest `28/28`、`packages/agent` tests `1703/1703`、agent typecheck、Server/Web build、lint 和
 `git diff --check` 均通过。此前隔离 synthetic owner/turn 上执行的真实 PostgreSQL `Promise.all` reservation 竞争为 `fulfilled=1/rejected=1`；
 本轮新增的 dispatch 单胜者、终态 guard、terminal winner/replay、reserve/dispatch crash recovery 场景已由 repository/Worker 契约覆盖。
-隔离 PostgreSQL 验收脚本 `apps/server/scripts/chat-run-budget-postgres-check.ts` 已加入，预期使用临时 tmpfs 容器；本轮 Docker daemon
-不可用（`dockerDesktopLinuxEngine` pipe 缺失），因此未宣称该脚本通过。证据等级为 `implemented + mock/static validated`，并保留既有
-`implemented + real PostgreSQL single-ledger concurrency` 证据；本次未读取 `.env` 凭据、未调用 DeepSeek/Qwen 或其他 Provider，也未清理
-既有 Docker 容器、卷、Redis 或 MinIO。
+隔离 PostgreSQL 验收脚本 `apps/server/scripts/chat-run-budget-postgres-check.ts` 使用临时 tmpfs 容器通过，输出 `passed=true`、20 个 migration、
+8 项 checks（cross-stage-cap、single-dispatch-winner、owner-isolation、cancel-race、active-turn-guard、reserve-crash-terminal-replay、
+dispatch-crash-held、recovery-settles-once）；容器已停止且 tmpfs 丢弃。证据等级提升为 `implemented + mock/static validated + real PostgreSQL
+isolated recovery`，仍不代表真实 Provider 或生产持续运行。本次未读取 `.env` 凭据、未调用 DeepSeek/Qwen 或其他 Provider，也未清理既有
+Docker 容器、卷、Redis 或 MinIO。
 
 ## 4. 明确未完成项
 
 这次已完成合同、数据库结构和最小运行时接入，但不代表已完成生产级全链路预算。后续 ticket 05 切片必须实现：
 
-1. 恢复 Docker Desktop 后执行隔离脚本，封存跨节点并发、取消释放、dispatch 后 uncertain、重复请求幂等和 crash/recovery 证据；现有
-   repository/Worker 契约已覆盖这些边界，但尚缺该次真实数据库脚本回执。
+1. 将本次隔离 PostgreSQL `passed=true` 回执作为 ticket 05 证据封存；现有 repository/Worker 契约与真实数据库脚本已共同覆盖跨节点并发、
+   取消释放、dispatch 后 uncertain、重复请求幂等和 crash/recovery 边界。
 2. 扩展 Router/Tutor/Retriever/Verifier/FinalResponse 的 Agent stage 接入，结算真实 usage/cost，并与 terminal Outbox、Redis stream、Trace 做 bounded reconciliation。
    对 UNCERTAIN 仅允许带外部 usage 证据的显式 `settleUncertain`，不提供无证据释放路径。
 3. 补 crash/recovery、跨节点竞争和产品链路回归；默认仍保持 mock/off，真实模型需另有授权和独立 controlled-Live 证据。

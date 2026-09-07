@@ -19,8 +19,8 @@ consumer 也不是真正 SSE push；完整 ledger 和真实模型 Worker 仍未�
 
 2026-09-07 ticket 05 dispatch/recovery 切片进一步冻结 ChatRunBudget 运行时边界：重复 dispatch 不会再次授予执行许可，活跃/排队 turn
 禁止提前终态对账，终态竞争失败方复用 durable winner，terminal replay 会再次执行 reconciliation；repository/Worker focused Jest `28/28`、
-agent 全量 `1703/1703`、build/typecheck/lint 均通过。隔离 PostgreSQL crash/concurrency 脚本已加入但 Docker daemon 当前不可用，故该项
-仍无本轮真实数据库回执；其他 Agent stage、Trace reconciliation 和真实模型结算仍未完成。
+agent 全量 `1703/1703`、build/typecheck/lint 均通过。隔离 PostgreSQL tmpfs 脚本输出 `passed=true`，20 migrations 和 8 项并发/取消/crash
+checks 全部通过；临时容器已停止且未触碰项目数据。其他 Agent stage、Trace reconciliation 和真实模型结算仍未完成。
 验收记录见 `docs/acceptance/phase-6-chat-run-budget-contract.md`。
 
 2026-09-04 的 ticket 01 又在同一 durable 写边界之上补齐认证 `POST /chat-turns`：请求由 strict shared Zod contract
