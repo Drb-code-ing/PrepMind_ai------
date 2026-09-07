@@ -22,6 +22,11 @@ import {
   ChatResponseWorkerService,
   DeterministicChatResponseGenerator,
 } from './chat-response-worker.service';
+import {
+  CHAT_ROUTER_RUNTIME,
+  ChatRouterStageService,
+  createChatRouterStageRuntime,
+} from './chat-router-stage';
 import { ChatTurnEnqueueService } from './chat-turn-enqueue.service';
 import { ChatTurnsRepository } from './chat-turns.repository';
 import { ChatRunBudgetRepository } from '../chat-run-budget/chat-run-budget.repository';
@@ -70,6 +75,24 @@ const chatResponseWorkerProviders = createChatResponseWorkerProviders(
     ChatTurnsQueryService,
     ChatResponseWorkerService,
     ChatRunBudgetStageRunner,
+    ChatRouterStageService,
+    {
+      provide: CHAT_ROUTER_RUNTIME,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<ServerEnv, true>) =>
+        createChatRouterStageRuntime({
+          AI_PROVIDER_MODE: config.get('AI_PROVIDER_MODE', { infer: true }),
+          AI_ENABLE_LIVE_CALLS: config.get('AI_ENABLE_LIVE_CALLS', {
+            infer: true,
+          }),
+          ROUTER_MODEL_ENABLED: config.get('ROUTER_MODEL_ENABLED', {
+            infer: true,
+          }),
+          DEEPSEEK_API_KEY: config.get('DEEPSEEK_API_KEY', { infer: true }),
+          AI_BASE_URL: config.get('AI_BASE_URL', { infer: true }),
+          AI_MODEL: config.get('AI_MODEL', { infer: true }),
+        }),
+    },
     DeterministicChatResponseGenerator,
     {
       provide: CHAT_RESPONSE_GENERATOR,

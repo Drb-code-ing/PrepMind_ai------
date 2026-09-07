@@ -12,6 +12,15 @@
 > 未查看或输出凭据、未调用 Provider；Next build 自动加载已有 `.env.local`。产品 Agent 尚未迁入 Server，WORKER 仍为 deterministic，
 > scope 仅供受信编排使用且每 stage/turn/attempt 一个 reservation。接下来先解耦并迁入 Agent 执行，再分配 stage 预算及接 Trace；细节见合同验收 3.1。
 
+> 2026-09-07 — Ticket 05 Router Server stage 原子切片：
+>
+> 新增 `ChatRouterStageService`，在 Worker 生成路径中先执行 Server-only Router stage；它复用 `routeAgentRequest`、`runRouterModelCandidate`
+> 和 turn-bound `ChatRunBudgetStageRunner`。默认 gate-off 时只返回 deterministic route，不预留预算、不调用 Provider；仅当全局 live、Router gate 和
+> DeepSeek 凭据同时满足时才创建 live runtime。Router 只负责路由，不伪装成最终回答生成器；Tutor/Retriever/Verifier/FinalResponse 仍待迁移。
+>
+> focused Server tests `44/44`、Server/Web build 通过；未读取 `.env`、未调用 Provider、未触碰项目 Docker/Redis/MinIO。该切片证据等级为
+> `implemented + mock/static validated`，Router controlled-Live 与产品真实模型 smoke 尚未执行。
+
 > 2026-09-07 — Ticket 05 隔离 PostgreSQL recovery 证据：
 >
 > Docker Desktop 恢复后执行 `bun --no-env-file apps/server/scripts/chat-run-budget-postgres-check.ts --run-isolated`，临时 tmpfs PostgreSQL 应用 20 个 migration，同机两个独立 PrismaClient 的跨 stage 上限、single dispatch winner、owner isolation、cancel race、active-turn guard、reserve crash replay、dispatch crash held 和 recovery settle-once 共 8 项检查全部通过（`passed=true`）。临时容器已停止并丢弃 tmpfs；项目容器、卷、Redis、MinIO 未触碰，未读取 `.env` 或调用 Provider。该回执补齐 Ticket 05 的真实数据库并发与子进程 post-commit crash/reconciliation 证据，但不覆盖多 Worker/跨主机/网络中断，也不证明真实模型或生产持续运行。

@@ -78,7 +78,7 @@ ChatTurn + BackgroundJob + chat.response.requested Outbox
 4. ~~将 bounded replay API 接入浏览器，并处理 cursor 过期与 PostgreSQL 状态恢复（ticket 04）。~~ 已完成 authenticated JSON
    cursor replay/polling、Dexie v10 checkpoint、身份 fence、status-only 和 Mock Docker/可见浏览器验收；详见
    [`phase-6-chat-turn-browser-replay.md`](acceptance/phase-6-chat-turn-browser-replay.md)。真正 SSE push 不在本 ticket 范围；
-5. 全链路 ChatRunBudget ledger、Trace 对账和跨节点上限（ticket 05）；
+5. 全链路 ChatRunBudget ledger、Trace 对账和跨节点上限（ticket 05）；Router Server stage 已接入，其他产品 Agent 仍待迁移；
 6. 真实模型 Worker 的独立 gate、usage/cost 和产品 smoke（ticket 06）。
 
 ### C. 分层记忆（Phase 6.10）

@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import type { Job } from 'bullmq';
 import { createHash } from 'node:crypto';
+import type { RouterResult } from '@repo/types/api/agent';
 
 import {
   CHAT_RESPONSE_COMPLETED_EVENT,
@@ -36,6 +37,7 @@ import {
   AgentBudgetAdmissionError,
   AgentBudgetDispatchError,
 } from '@repo/agent/chat-run-budget';
+import { ChatRouterStageService } from './chat-router-stage';
 
 export const CHAT_RESPONSE_GENERATOR = Symbol('CHAT_RESPONSE_GENERATOR');
 
@@ -53,6 +55,7 @@ export type ChatResponseGeneratorInput = Readonly<{
   messages: readonly ChatResponseInputMessage[];
   budgetPolicyVersion: string;
   signal: AbortSignal;
+  route?: RouterResult;
 }>;
 
 export type ChatResponseGeneratorResult = Readonly<{
@@ -129,6 +132,7 @@ export class ChatResponseWorkerService {
     @Optional() private readonly streams?: ChatStreamStore,
     @Optional() private readonly budgets?: ChatRunBudgetRepository,
     @Optional() private readonly budgetRunner?: ChatRunBudgetStageRunner,
+    @Optional() private readonly routerStage?: ChatRouterStageService,
   ) {}
 
   async process(job: Job<unknown>): Promise<void> {
@@ -241,7 +245,16 @@ export class ChatResponseWorkerService {
         costMicros: Math.min(scope.limits.maxCostMicros, 100_000),
       },
       async () => {
-        const value = await this.generate(turn, messages);
+        const router = await this.routerStage?.run({
+          ownerId: turn.userId,
+          turnId: turn.id,
+          policyVersion: turn.budgetPolicyVersion,
+          attempt,
+          text: messages
+            .filter((message) => message.role === 'USER')
+            .at(-1)?.content ?? '',
+        });
+        const value = await this.generate(turn, messages, router?.route);
         validateGeneratedResult(value);
         return {
           value,
@@ -543,6 +556,7 @@ export class ChatResponseWorkerService {
   private async generate(
     turn: ChatTurn,
     messages: readonly ChatResponseInputMessage[],
+    route?: RouterResult,
   ) {
     const controller = new AbortController();
     const timeoutMs = readGenerationTimeoutMs();
@@ -554,6 +568,7 @@ export class ChatResponseWorkerService {
       messages,
       budgetPolicyVersion: turn.budgetPolicyVersion,
       signal: controller.signal,
+      ...(route ? { route } : {}),
     });
     try {
       return await new Promise<ChatResponseGeneratorResult>(
