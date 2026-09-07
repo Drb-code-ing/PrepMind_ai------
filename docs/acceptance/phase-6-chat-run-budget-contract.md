@@ -24,10 +24,11 @@
   reconcile；enqueue 在创建 ChatTurn/BackgroundJob/Outbox 的同一事务内创建 ledger，Worker 在生成前预留 `WORKER` scope，并在终态释放
   尚未 dispatch 的 reservation。重复 dispatch 不会再次授予执行许可；活跃/排队 turn 禁止提前终态对账；终态竞争失败方复用 durable winner。
 - `@repo/agent` 新增与 Server 解耦的 `AgentBudgetPort`/`runBudgetedStage` typed capability：阶段可注入 reserve/dispatch/settle/uncertain/release，
-  Provider 异常默认保留 `UNCERTAIN`。该 port 已有单元测试，但 Router/Tutor/Retriever/Verifier/FinalResponse 尚未由产品 composition root 注入。
+  Provider 异常默认保留 `UNCERTAIN`。Router 已通过 Server-only stage 注入 Worker；Tutor/Retriever/Verifier/FinalResponse 尚未由产品 composition root 注入。
 - Server 新增 `ChatRunBudgetStageRunner`：按 `ownerId + turnId + policyVersion + attempt` 创建不可变 scope，仅暴露阶段运行和预算上限；Worker
-  已通过该 capability 执行 `WORKER` reservation，不再在生产路径手写 reserve/dispatch/settle。该接入仍是 deterministic Worker baseline，不等于
-  Router/Tutor/Retriever/Verifier/FinalResponse 产品 stage 已接入。
+  已通过该 capability 执行 `WORKER` reservation，不再在生产路径手写 reserve/dispatch/settle。Router stage 现在也通过 Server-only
+  `ChatRouterStageService` 进入 Worker 生成路径；默认 gate-off 时只返回 deterministic route，不预留预算或调用 Provider，开启全部 gate 后才会
+  使用现有 Router candidate/runtime 并结算该 stage usage。Tutor/Retriever/Verifier/FinalResponse 仍未迁入。
 
 ## 3. 验证证据
 
@@ -54,6 +55,7 @@ Docker 容器、卷、Redis 或 MinIO。
 - Prisma `userId/Date` 显式转成共享合同的 `ownerId/ISO time`，经 Zod 校验；scope 不暴露 Repository、释放或带外恢复入口。
 - 缺失、取消、owner/turn/policy 不一致的 ledger 拒绝执行；settlement 冲突不发布成功回答；重复 dispatch 的专用错误保持原任务事实。
 - StageRunner/Worker/module focused `41/41`、Agent 全量 `1703/1703`、Agent typecheck、Server/Web build 和目标 lint/Prettier 通过。
+- Router stage focused `3/3`，Server build 通过；测试覆盖默认 gate-off、全局/组件 gate 与凭据联动。尚未执行 Router controlled-Live 或产品真实模型 smoke。
 - 同一隔离脚本增加两项，当前 `10/10`：`stage-runner-shared-cap` 在两个 scope 的 ROUTER/VERIFIER 竞争中只执行一次，
   `usedCalls=1 / heldCalls=0 / usedCostMicros=60`；`stage-runner-duplicate-no-execute` 拒绝已结算阶段的再次执行。
   这里执行的是 synthetic callback，不是 Router/Verifier 模型；原八项检查未删除或改写。
@@ -74,9 +76,9 @@ bun --no-env-file apps/server/scripts/chat-run-budget-postgres-check.ts --run-is
 这次已完成合同、数据库结构和最小运行时接入，但不代表已完成生产级全链路预算。后续 ticket 05 切片必须实现：
 
 1. 补多 Worker/跨主机、网络中断和数据库故障恢复证据；现有证据仅覆盖同机多 PrismaClient 竞争和子进程 post-commit 恢复。
-2. 扩展 Router/Tutor/Retriever/Verifier/FinalResponse 的 Agent stage 接入，复用 Server turn-bound runner，结算真实 usage/cost，并与 terminal Outbox、Redis stream、Trace 做 bounded reconciliation。
+2. 扩展 Tutor/Retriever/Verifier/FinalResponse 的 Agent stage 接入，复用 Server turn-bound runner，结算真实 usage/cost，并与 terminal Outbox、Redis stream、Trace 做 bounded reconciliation；Router 仍需独立产品 smoke。
    对 UNCERTAIN 仅允许带外部 usage 证据的显式 `settleUncertain`，不提供无证据释放路径。
-3. 产品 Agent 编排仍在 Web；先将执行能力与 Web 配置/HTTP 依赖解耦，迁入 Server composition 后使用上述 scope，不能用只有测试调用的
+3. 除 Router stage 外，产品 Agent 编排仍在 Web；先将执行能力与 Web 配置/HTTP 依赖解耦，迁入 Server composition 后使用上述 scope，不能用只有测试调用的
    wrapper 宣称接入完成。默认仍保持 mock/off，真实模型 Worker 属于 ticket 06，需独立受控证据。
 
 ## 5. 复核入口
