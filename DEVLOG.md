@@ -1,5 +1,9 @@
 # PrepMind AI 开发日志
 
+> 2026-09-07 — Ticket 05 隔离 PostgreSQL recovery 证据：
+>
+> Docker Desktop 恢复后执行 `bun --no-env-file apps/server/scripts/chat-run-budget-postgres-check.ts --run-isolated`，临时 tmpfs PostgreSQL 应用 20 个 migration，同机两个独立 PrismaClient 的跨 stage 上限、single dispatch winner、owner isolation、cancel race、active-turn guard、reserve crash replay、dispatch crash held 和 recovery settle-once 共 8 项检查全部通过（`passed=true`）。临时容器已停止并丢弃 tmpfs；项目容器、卷、Redis、MinIO 未触碰，未读取 `.env` 或调用 Provider。该回执补齐 Ticket 05 的真实数据库并发与子进程 post-commit crash/reconciliation 证据，但不覆盖多 Worker/跨主机/网络中断，也不证明真实模型或生产持续运行。
+
 > 2026-09-07 — Ticket 05 dispatch/recovery 原子切片：
 >
 > 修正重复 Bull 投递、终态提前对账和终态竞争失败三类生产边界。已 dispatch 的 reservation 不再授予第二次 provider 执行许可；`reconcileTerminal()` 仅接受 `SUCCEEDED/FAILED/CANCELLED` turn，并保留活跃 turn 的 held 预算；并发失败方复用已提交的 durable winner，terminal replay 会再次尝试预算对账。新增 repository/Worker 回归覆盖重复 dispatch、取消竞态、活动 turn guard、terminal winner 和 reserve/dispatch 后崩溃恢复语义。`apps/server` focused Jest `28/28`、`@repo/agent` 全量 `1703/1703`、build、typecheck、lint 和 `git diff --check` 通过。

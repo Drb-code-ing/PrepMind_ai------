@@ -36,7 +36,7 @@ Bun。此前完成的 `/agent-trace` Mock/Live 切换和 durable ChatTurn 浏览
 | Knowledge Dedup / Organizer | owner-scoped shortlist、受限 candidate 与 deterministic fallback 已实现                                       | 需要最新矩阵确认真实产品 smoke 状态                                                 |
 | Retriever / FinalResponse   | `/api/chat` 主回答链有真实模型 smoke；历史质量门失败证据不可重跑                                              | 不能据此证明上游每个 Agent 或 SLA                                                   |
 | Chat response worker        | Outbox -> BullMQ -> claim -> durable terminal commit；Stream contract、Redis bounded replay 和状态查询已实现  | 当前 generator 是 `deterministic-worker-v1`；全链路 ledger、真实模型 Worker 未完成  |
-| ChatRunBudget 合同          | `@repo/types`、Prisma schema/migration、owner-scoped repository、Worker reservation/settlement/terminal reconcile、显式 UNCERTAIN recovery、dispatch 单胜者、终态 guard、`@repo/agent` typed budget port 与真实单 ledger 并发验收已实现 | 隔离脚本尚待 Docker 恢复后执行；产品 Agent stage 注入、Trace 对账和真实模型结算未完成 |
+| ChatRunBudget 合同          | `@repo/types`、Prisma schema/migration、owner-scoped repository、Worker reservation/settlement/terminal reconcile、显式 UNCERTAIN recovery、dispatch 单胜者、终态 guard、`@repo/agent` typed budget port 与隔离 PostgreSQL 同机多 client 并发及子进程 post-commit crash 验收已实现 | 多 Worker/跨主机/网络故障恢复、产品 Agent stage 注入、Trace 对账和真实模型结算未完成 |
 | ChatTurn product bridge     | gate-on 后 prepare/enqueue/`202`；浏览器 owner-bound status + JSON cursor replay、刷新恢复和 status-only 降级 | gate 默认关闭；首轮保留 legacy；当前不是长连接 BFF SSE push，也不是生产持续运行证据 |
 | MemoryAgent                 | PostgreSQL 候选/确认/停用/删除流程已实现                                                                      | 当前无模型 gate、自动注入或完整分层记忆实现                                         |
 | Tool-Using Orchestrator     | 未实现                                                                                                        | 仅在治理 catalog/规划中出现                                                         |
@@ -54,7 +54,8 @@ Bun。此前完成的 `/agent-trace` Mock/Live 切换和 durable ChatTurn 浏览
 ## 下一步顺序
 
 1. 完成 Phase 6 Agent 审计：逐项确认通信、owner/权限、并发、预算 ledger、取消、Trace 和真实模型产品 smoke。
-2. 恢复 Docker 后执行 ChatRunBudget 隔离跨节点/crash recovery 脚本并封存证据；随后补齐其他 Agent stage 和 Trace 对账（ticket 05）。
+2. 继续补齐其他 Agent stage 和 Trace 对账（ticket 05）；ChatRunBudget 同机多 client 并发与子进程 post-commit crash/reconciliation 证据已封存，
+   多 Worker/跨主机/网络故障恢复仍待专门验收。
 3. 为 Chat Worker 接入独立真实模型 gate、usage/cost 记录和产品 controlled smoke（ticket 06）；继续保持默认 mock/off。
 4. 以负载和延迟数据评估是否另做真正 SSE push；ticket 04 当前是 JSON replay/polling，不伪称 SSE。
 5. 在全部 Agent 架构完成后，设计并实现分层记忆：瞬时上下文、短期会话缓存、长期持久化记忆；再按用户要求编写两篇独立面试博客。
