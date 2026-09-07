@@ -21,6 +21,12 @@
 > focused Server tests `44/44`、Server/Web build 通过；未读取 `.env`、未调用 Provider、未触碰项目 Docker/Redis/MinIO。该切片证据等级为
 > `implemented + mock/static validated`，Router controlled-Live 与产品真实模型 smoke 尚未执行。
 
+> 2026-09-07 — Verifier 迁移前置边界复核：
+>
+> 复核发现 Server Worker 当前只加载 owner-bound ChatMessage，没有 Retriever 的知识块投影；Verifier 的有效输入必须是真实、状态受限且归属校验的 chunks。
+> 因此不创建空数组或 no-op Verifier wrapper，不把它宣称为产品接入。下一原子任务调整为先迁移 Server Retriever projection，再接 Verifier model candidate；该调整符合
+> ChatRunBudget 设计的 Router -> Retriever -> Verifier 顺序。未读取凭据、未调用 Provider、未触碰 Docker/Redis/MinIO。
+
 > 2026-09-07 — Ticket 05 隔离 PostgreSQL recovery 证据：
 >
 > Docker Desktop 恢复后执行 `bun --no-env-file apps/server/scripts/chat-run-budget-postgres-check.ts --run-isolated`，临时 tmpfs PostgreSQL 应用 20 个 migration，同机两个独立 PrismaClient 的跨 stage 上限、single dispatch winner、owner isolation、cancel race、active-turn guard、reserve crash replay、dispatch crash held 和 recovery settle-once 共 8 项检查全部通过（`passed=true`）。临时容器已停止并丢弃 tmpfs；项目容器、卷、Redis、MinIO 未触碰，未读取 `.env` 或调用 Provider。该回执补齐 Ticket 05 的真实数据库并发与子进程 post-commit crash/reconciliation 证据，但不覆盖多 Worker/跨主机/网络中断，也不证明真实模型或生产持续运行。
