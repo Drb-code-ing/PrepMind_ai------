@@ -1,7 +1,7 @@
 # Phase 6 ChatRunBudget 合同验收
 
-更新时间：2026-09-05
-状态：共享类型、Prisma schema/migration、owner-scoped repository 和 deterministic Worker 预留/结算接入已实现；本地 PostgreSQL migration 已部署；Trace 对账、并发/crash 证据和真实模型验收未实现。
+更新时间：2026-09-07
+状态：共享类型、Prisma schema/migration、owner-scoped repository、deterministic Worker 预留/结算、终态对账与单 ledger 并发边界已实现；隔离 PostgreSQL crash/recovery 脚本已加入但因 Docker Desktop backend 当前不可用尚未执行。Trace 对账、产品 Agent stage 注入和真实模型验收仍未实现。
 
 ## 1. 目的
 
@@ -22,7 +22,7 @@
   不携带 prompt、provider 原文或凭据字段。
 - Server repository 使用 Serializable transaction + 条件 `updateMany` 做 reserve、dispatch、settle、release、uncertain、cancel 和终态
   reconcile；enqueue 在创建 ChatTurn/BackgroundJob/Outbox 的同一事务内创建 ledger，Worker 在生成前预留 `WORKER` scope，并在终态释放
-  尚未 dispatch 的 reservation。
+  尚未 dispatch 的 reservation。重复 dispatch 不会再次授予执行许可；活跃/排队 turn 禁止提前终态对账；终态竞争失败方复用 durable winner。
 - `@repo/agent` 新增与 Server 解耦的 `AgentBudgetPort`/`runBudgetedStage` typed capability：阶段可注入 reserve/dispatch/settle/uncertain/release，
   Provider 异常默认保留 `UNCERTAIN`。该 port 已有单元测试，但 Router/Tutor/Retriever/Verifier/FinalResponse 尚未由产品 composition root 注入。
 
@@ -36,17 +36,20 @@ typecheck: passed
 Prettier: passed
 ```
 
-追加验证：`apps/server` focused Jest 18/18（含 P2034 Serializable retry）、`packages/database` tests 11/11、Server build 通过；隔离 synthetic owner/turn 上执行的真实
-PostgreSQL `Promise.all` reservation 竞争为 `fulfilled=1/rejected=1`，最终 ledger `heldCalls=1/usedCalls=0`；`prisma migrate deploy` 已成功应用
-`20260905100000_chat_run_budget`，随后 `prisma migrate status` 报告 schema up to date。测试覆盖数值边界、unknown/raw payload 拒绝、reservation
-生命周期、settlement/cancellation event 语义和 terminal 未 dispatch 释放。证据等级为 `implemented + mock/static validated`；本次未读取 `.env` 中
-的凭据、未调用 DeepSeek/Qwen 或其他 Provider，Docker 仅读取容器状态且未清理数据。
+追加验证：`apps/server` ChatRunBudget/Worker focused Jest `28/28`、`packages/agent` tests `1703/1703`、agent typecheck、Server/Web build、lint 和
+`git diff --check` 均通过。此前隔离 synthetic owner/turn 上执行的真实 PostgreSQL `Promise.all` reservation 竞争为 `fulfilled=1/rejected=1`；
+本轮新增的 dispatch 单胜者、终态 guard、terminal winner/replay、reserve/dispatch crash recovery 场景已由 repository/Worker 契约覆盖。
+隔离 PostgreSQL 验收脚本 `apps/server/scripts/chat-run-budget-postgres-check.ts` 已加入，预期使用临时 tmpfs 容器；本轮 Docker daemon
+不可用（`dockerDesktopLinuxEngine` pipe 缺失），因此未宣称该脚本通过。证据等级为 `implemented + mock/static validated`，并保留既有
+`implemented + real PostgreSQL single-ledger concurrency` 证据；本次未读取 `.env` 凭据、未调用 DeepSeek/Qwen 或其他 Provider，也未清理
+既有 Docker 容器、卷、Redis 或 MinIO。
 
 ## 4. 明确未完成项
 
 这次已完成合同、数据库结构和最小运行时接入，但不代表已完成生产级全链路预算。后续 ticket 05 切片必须实现：
 
-1. 在隔离验收数据库补真实 PostgreSQL 并发超限、取消释放、dispatch 后 uncertain、重复请求幂等和 crash/recovery 回归；当前本地 migration 已部署，尚无并发证据。
+1. 恢复 Docker Desktop 后执行隔离脚本，封存跨节点并发、取消释放、dispatch 后 uncertain、重复请求幂等和 crash/recovery 证据；现有
+   repository/Worker 契约已覆盖这些边界，但尚缺该次真实数据库脚本回执。
 2. 扩展 Router/Tutor/Retriever/Verifier/FinalResponse 的 Agent stage 接入，结算真实 usage/cost，并与 terminal Outbox、Redis stream、Trace 做 bounded reconciliation。
    对 UNCERTAIN 仅允许带外部 usage 证据的显式 `settleUncertain`，不提供无证据释放路径。
 3. 补 crash/recovery、跨节点竞争和产品链路回归；默认仍保持 mock/off，真实模型需另有授权和独立 controlled-Live 证据。

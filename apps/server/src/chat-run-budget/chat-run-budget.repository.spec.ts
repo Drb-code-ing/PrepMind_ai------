@@ -12,10 +12,37 @@ const ledgerId = 'ledger_1';
 const reservationId = 'reservation_1';
 
 describe('ChatRunBudgetRepository', () => {
+  it('does not grant another execution permit to a dispatched reservation', async () => {
+    const reservation = makeReservation({
+      status: 'DISPATCHED',
+      dispatchedAt: new Date('2026-09-05T00:00:01.000Z'),
+    });
+    const transaction = {
+      chatRunBudgetReservation: {
+        findUnique: jest.fn().mockResolvedValue(reservation),
+        update: jest.fn(),
+      },
+      chatRunBudgetEvent: { create: jest.fn() },
+    };
+    const repository = new ChatRunBudgetRepository({
+      $transaction: (operation: (tx: typeof transaction) => unknown) =>
+        operation(transaction),
+    } as never);
+
+    await expect(repository.dispatch(ownerId, reservationId)).resolves.toEqual({
+      kind: 'conflict',
+      reservation,
+    });
+    expect(transaction.chatRunBudgetReservation.update).not.toHaveBeenCalled();
+  });
+
   it('reserves an owner-bound stage and is idempotent for the same reservation', async () => {
     const ledger = makeLedger();
     const reservation = makeReservation();
     const transaction = {
+      chatTurn: {
+        findUnique: jest.fn().mockResolvedValue({ status: 'ACTIVE' }),
+      },
       chatRunBudget: {
         findUnique: jest.fn().mockResolvedValue(ledger),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -30,9 +57,8 @@ describe('ChatRunBudgetRepository', () => {
       chatRunBudgetEvent: { create: jest.fn().mockResolvedValue({}) },
     };
     const prisma = {
-      $transaction: jest.fn(
-        async (operation: (tx: typeof transaction) => unknown) =>
-          operation(transaction),
+      $transaction: jest.fn((operation: (tx: typeof transaction) => unknown) =>
+        operation(transaction),
       ),
     } as never;
     const repository = new ChatRunBudgetRepository(prisma);
@@ -57,6 +83,9 @@ describe('ChatRunBudgetRepository', () => {
 
   it('fails closed when the owner ledger cannot hold the reservation', async () => {
     const transaction = {
+      chatTurn: {
+        findUnique: jest.fn().mockResolvedValue({ status: 'ACTIVE' }),
+      },
       chatRunBudget: {
         findUnique: jest.fn().mockResolvedValue(makeLedger()),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -68,9 +97,8 @@ describe('ChatRunBudgetRepository', () => {
       chatRunBudgetEvent: { create: jest.fn() },
     };
     const prisma = {
-      $transaction: jest.fn(
-        async (operation: (tx: typeof transaction) => unknown) =>
-          operation(transaction),
+      $transaction: jest.fn((operation: (tx: typeof transaction) => unknown) =>
+        operation(transaction),
       ),
     } as never;
     const repository = new ChatRunBudgetRepository(prisma);
@@ -94,12 +122,18 @@ describe('ChatRunBudgetRepository', () => {
     const ledger = makeLedger();
     const reservation = makeReservation();
     const transaction = {
+      chatTurn: {
+        findUnique: jest.fn().mockResolvedValue({ status: 'ACTIVE' }),
+      },
       chatRunBudget: {
         findUnique: jest.fn().mockResolvedValue(ledger),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       chatRunBudgetReservation: {
-        findUnique: jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(reservation),
+        findUnique: jest
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(reservation),
         create: jest.fn().mockResolvedValue(reservation),
       },
       chatRunBudgetEvent: { create: jest.fn().mockResolvedValue({}) },
@@ -112,7 +146,7 @@ describe('ChatRunBudgetRepository', () => {
       $transaction: jest
         .fn()
         .mockRejectedValueOnce(serializationConflict)
-        .mockImplementation(async (operation: (tx: typeof transaction) => unknown) =>
+        .mockImplementation((operation: (tx: typeof transaction) => unknown) =>
           operation(transaction),
         ),
     } as never;
@@ -131,7 +165,9 @@ describe('ChatRunBudgetRepository', () => {
       }),
     ).resolves.toBe(reservation);
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(transaction.chatRunBudgetReservation.create).toHaveBeenCalledTimes(1);
+    expect(transaction.chatRunBudgetReservation.create).toHaveBeenCalledTimes(
+      1,
+    );
   });
 
   it('settles once and moves held usage into used usage', async () => {
@@ -153,9 +189,8 @@ describe('ChatRunBudgetRepository', () => {
       chatRunBudgetEvent: { create: jest.fn().mockResolvedValue({}) },
     };
     const prisma = {
-      $transaction: jest.fn(
-        async (operation: (tx: typeof transaction) => unknown) =>
-          operation(transaction),
+      $transaction: jest.fn((operation: (tx: typeof transaction) => unknown) =>
+        operation(transaction),
       ),
     } as never;
     const repository = new ChatRunBudgetRepository(prisma);
@@ -167,11 +202,19 @@ describe('ChatRunBudgetRepository', () => {
     });
     expect(result.kind).toBe('updated');
     expect(transaction.chatRunBudget.updateMany).toHaveBeenCalled();
-    expect(transaction.chatRunBudgetEvent.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ type: 'SETTLED' }),
-      }),
-    );
+    expect(transaction.chatRunBudgetEvent.create).toHaveBeenCalledWith({
+      data: {
+        userId: ownerId,
+        turnId,
+        ledgerId,
+        reservationId,
+        stage: 'TUTOR',
+        type: 'SETTLED',
+        usageInputTokens: 90,
+        usageOutputTokens: 40,
+        usageCostMicros: 900,
+      },
+    });
   });
 
   it('settles an UNCERTAIN reservation only with explicit recovered usage', async () => {
@@ -199,9 +242,8 @@ describe('ChatRunBudgetRepository', () => {
       chatRunBudgetEvent: { create: jest.fn().mockResolvedValue({}) },
     };
     const prisma = {
-      $transaction: jest.fn(
-        async (operation: (tx: typeof transaction) => unknown) =>
-          operation(transaction),
+      $transaction: jest.fn((operation: (tx: typeof transaction) => unknown) =>
+        operation(transaction),
       ),
     } as never;
     const repository = new ChatRunBudgetRepository(prisma);
@@ -213,11 +255,19 @@ describe('ChatRunBudgetRepository', () => {
         costMicros: 900,
       }),
     ).resolves.toMatchObject({ kind: 'updated', reservation: settled });
-    expect(transaction.chatRunBudgetEvent.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ type: 'SETTLED', usageCostMicros: 900 }),
-      }),
-    );
+    expect(transaction.chatRunBudgetEvent.create).toHaveBeenCalledWith({
+      data: {
+        userId: ownerId,
+        turnId,
+        ledgerId,
+        reservationId,
+        stage: 'TUTOR',
+        type: 'SETTLED',
+        usageInputTokens: 90,
+        usageOutputTokens: 40,
+        usageCostMicros: 900,
+      },
+    });
   });
 
   it('reconciles unstarted reservations without touching uncertain work', async () => {
@@ -228,6 +278,9 @@ describe('ChatRunBudgetRepository', () => {
       heldCostMicros: 1000,
     });
     const transaction = {
+      chatTurn: {
+        findUnique: jest.fn().mockResolvedValue({ status: 'SUCCEEDED' }),
+      },
       chatRunBudget: {
         findUnique: jest.fn().mockResolvedValue(ledger),
         update: jest.fn().mockResolvedValue({ ...ledger, heldCalls: 0 }),
@@ -250,9 +303,8 @@ describe('ChatRunBudgetRepository', () => {
       },
     };
     const prisma = {
-      $transaction: jest.fn(
-        async (operation: (tx: typeof transaction) => unknown) =>
-          operation(transaction),
+      $transaction: jest.fn((operation: (tx: typeof transaction) => unknown) =>
+        operation(transaction),
       ),
     } as never;
     const repository = new ChatRunBudgetRepository(prisma);
@@ -262,6 +314,76 @@ describe('ChatRunBudgetRepository', () => {
     ).resolves.toMatchObject({ heldCalls: 0 });
     expect(transaction.chatRunBudgetEvent.createMany).toHaveBeenCalledTimes(1);
   });
+
+  it('never reconciles reservations for an active turn', async () => {
+    const transaction = {
+      chatTurn: {
+        findUnique: jest.fn().mockResolvedValue({ status: 'ACTIVE' }),
+      },
+      chatRunBudget: { findUnique: jest.fn().mockResolvedValue(makeLedger()) },
+      chatRunBudgetReservation: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const repository = new ChatRunBudgetRepository({
+      $transaction: (operation: (tx: typeof transaction) => unknown) =>
+        operation(transaction),
+    } as never);
+
+    await expect(repository.reconcileTerminal(ownerId, turnId)).rejects.toThrow(
+      'not terminal',
+    );
+    expect(
+      transaction.chatRunBudgetReservation.findMany,
+    ).not.toHaveBeenCalled();
+  });
+
+  it.each(['SUCCEEDED', 'FAILED', 'CANCELLED', null])(
+    'rejects new reserve and dispatch for a closed or absent turn: %s',
+    async (status) => {
+      const reservation = makeReservation();
+      const transaction = {
+        chatTurn: {
+          findUnique: jest.fn().mockResolvedValue(status ? { status } : null),
+        },
+        chatRunBudget: {
+          findUnique: jest.fn().mockResolvedValue(makeLedger()),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        chatRunBudgetReservation: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValueOnce(null)
+            .mockResolvedValue(reservation),
+          create: jest.fn().mockResolvedValue(reservation),
+          update: jest.fn().mockResolvedValue(reservation),
+        },
+        chatRunBudgetEvent: { create: jest.fn() },
+      };
+      const repository = new ChatRunBudgetRepository({
+        $transaction: (operation: (tx: typeof transaction) => unknown) =>
+          operation(transaction),
+      } as never);
+
+      await expect(
+        repository.reserve({
+          ownerId,
+          turnId,
+          ledgerId,
+          reservationId,
+          stage: 'TUTOR',
+          inputTokens: 100,
+          outputTokens: 50,
+          costMicros: 1000,
+        }),
+      ).rejects.toThrow('unavailable');
+      await expect(
+        repository.dispatch(ownerId, reservationId),
+      ).resolves.toMatchObject({ kind: 'conflict' });
+      expect(transaction.chatRunBudget.updateMany).not.toHaveBeenCalled();
+      expect(
+        transaction.chatRunBudgetReservation.update,
+      ).not.toHaveBeenCalled();
+    },
+  );
 });
 
 function makeLedger(overrides: Partial<ChatRunBudget> = {}): ChatRunBudget {
