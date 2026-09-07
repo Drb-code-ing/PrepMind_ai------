@@ -151,8 +151,9 @@ HTTP request
 7. ~~恢复本地 Worker readiness 与 CLI。~~ 已关闭 retained failure 永久降级和 direct `ts-node` 入口失败，Docker Worker
    `healthy`；历史失败没有删除，真实模型 Worker 边界没有改变。
 8. ~~冻结 ChatRunBudget 共享类型与生命周期合同。~~ 已完成；实现与边界见 `phase-6-chat-run-budget-contract.md`。
-9. ~~在本地 PostgreSQL 部署 ChatRunBudget migration。~~ 已完成：`prisma migrate deploy` 应用 `20260905100000_chat_run_budget` 且 status up to date；仍需隔离数据库
-   Serializable/CAS 并发、crash/recovery 证据，并补齐其他 Agent stages、Trace 对账。
+9. ~~在本地 PostgreSQL 部署 ChatRunBudget migration。~~ 已完成：`prisma migrate deploy` 应用 `20260905100000_chat_run_budget` 且 status up to date；
+   隔离 PostgreSQL 同机多 client 并发与子进程 post-commit crash/reconciliation 脚本也已通过。多 Worker/跨主机/网络故障恢复、其他 Agent
+   stages 与 Trace 对账仍待完成。
 10. 为 MemoryAgent 定义真实模型增强的隐私、候选确认、预算和 Trace 合同；完成 Agent 架构后再进入分层记忆实现。
 11. 做独立 Review/Planner、Knowledge agents、Router/Verifier/Tutor/Rewrite 的产品验收，保持浏览器窗口可见并保留证据。
 12. 所有代码/文档任务逐项提交、推送、`--no-ff` 合并 main，再在 merged-main 复验；全部 Agent 架构与真实验收完成后，才写两篇面试博客。

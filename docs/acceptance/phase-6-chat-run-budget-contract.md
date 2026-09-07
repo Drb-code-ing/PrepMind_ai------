@@ -49,8 +49,9 @@ Docker 容器、卷、Redis 或 MinIO。
 
 这次已完成合同、数据库结构和最小运行时接入，但不代表已完成生产级全链路预算。后续 ticket 05 切片必须实现：
 
-1. 将本次隔离 PostgreSQL `passed=true` 回执作为 ticket 05 证据封存；现有 repository/Worker 契约与真实数据库脚本已共同覆盖跨节点并发、
-   取消释放、dispatch 后 uncertain、重复请求幂等和 crash/recovery 边界。
+1. 将本次隔离 PostgreSQL `passed=true` 回执作为 ticket 05 证据封存；现有 repository/Worker 契约与真实数据库脚本已共同覆盖同机多
+   PrismaClient 的并发竞争、取消释放、dispatch 后 uncertain、重复请求幂等和子进程 post-commit crash/reconciliation 边界。尚未覆盖多
+   Worker/跨主机、网络中断或数据库故障恢复。
 2. 扩展 Router/Tutor/Retriever/Verifier/FinalResponse 的 Agent stage 接入，结算真实 usage/cost，并与 terminal Outbox、Redis stream、Trace 做 bounded reconciliation。
    对 UNCERTAIN 仅允许带外部 usage 证据的显式 `settleUncertain`，不提供无证据释放路径。
 3. 补 crash/recovery、跨节点竞争和产品链路回归；默认仍保持 mock/off，真实模型需另有授权和独立 controlled-Live 证据。

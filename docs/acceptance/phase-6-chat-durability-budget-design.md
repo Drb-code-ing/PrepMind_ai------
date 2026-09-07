@@ -1,6 +1,6 @@
 # Phase 6 Chat Durability and Budget Design
 
-更新时间：2026-09-05
+更新时间：2026-09-07
 状态：可靠入队、deterministic Worker、bounded replay API、gate-on 产品 bridge/浏览器恢复和 ChatRunBudget 共享类型合同已实现；
 全链路持久化 budget ledger、真正长连接 SSE push 和真实模型 Worker 仍未实现。实现证据见
 [`phase-6-chat-turn-browser-replay.md`](phase-6-chat-turn-browser-replay.md) 与
@@ -117,10 +117,10 @@ reservation 的 `RESERVED -> DISPATCHED -> SETTLED|UNCERTAIN` 与未 dispatch �
 4. ~~增加 bounded stream/replay 与浏览器断线恢复。~~ 已完成 Redis store、owner-scoped query/controller、Worker 发布、gate-on
    `/api/chat` admission/handoff 和 JSON replay/status consumer；不是长连接 SSE push，首轮和 gate-off 仍保留 legacy。
 5. ~~冻结 ChatRunBudget 共享类型合同与生命周期边界。~~ 已完成；详见 ChatRunBudget 合同验收文档。
-6. ~~实现 Prisma ledger/reservation/event 结构、Serializable/CAS repository 和 Worker 预留/结算最小接入。~~ 已完成；真实 PostgreSQL
-   并发验收、全链路 Agent stage 与 Trace 对账仍待完成。
-7. 将 migration 部署到隔离验收数据库，补 Router/Tutor/Retriever/Verifier/FinalResponse stage，再为 Worker 接入独立真实模型 gate 和
-   usage/cost；完成产品迁移后再移除 legacy snapshot 权威写入。
+6. ~~实现 Prisma ledger/reservation/event 结构、Serializable/CAS repository 和 Worker 预留/结算最小接入。~~ 已完成；隔离 PostgreSQL
+   并发/crash 证据已补齐，全链路 Agent stage 与 Trace 对账仍待完成。
+7. ~~将 migration 部署到隔离验收数据库。~~ 已完成：隔离 PostgreSQL 同机多 client 并发与 post-commit crash/reconciliation 脚本通过。
+   Router/Tutor/Retriever/Verifier/FinalResponse stage、Worker 真实模型 gate、usage/cost 和 legacy migration 仍待完成。
 8. 进行 Docker、API、可见浏览器和真实模型 controlled smoke；每一步单独提交、推送、合并 main 后复验。
 
 ## 7. 本 checkpoint 的明确结论
@@ -129,5 +129,5 @@ reservation 的 `RESERVED -> DISPATCHED -> SETTLED|UNCERTAIN` 与未 dispatch �
 - “BackgroundJob + Outbox 同事务”与 Worker durable terminal commit 已实现；gate-on `/api/chat` handoff 和浏览器 JSON status/replay
   已接入，真正 SSE push 尚未实现。
 - 当前 Worker 的生成器是 `deterministic-worker-v1`，只证明执行与持久化骨架，不证明真实模型或语义质量。
-- 本 checkpoint 已增加 runtime repository、Worker `WORKER` reservation 和终态对未 dispatch reservation 的释放；完整 Trace reconciliation、
-  真实 PostgreSQL 并发证据和其他 Agent stage 仍未完成。
+- 本 checkpoint 已增加 runtime repository、Worker `WORKER` reservation 和终态对未 dispatch reservation 的释放；真实 PostgreSQL 同机多 client
+  并发及子进程 post-commit recovery 已有脚本回执；完整 Trace reconciliation、跨节点/网络故障证据和其他 Agent stage 仍未完成。
