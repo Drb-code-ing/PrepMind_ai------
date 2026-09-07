@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 
 import { runBudgetedStage, type AgentBudgetPort } from '../src/contracts/chat-run-budget';
 
@@ -27,6 +27,34 @@ const input = {
 };
 
 describe('runBudgetedStage', () => {
+  it('does not execute or release a duplicate dispatched reservation', async () => {
+    const release = mock(async () => ({ kind: 'not-found' }) as const);
+    const execute = mock(async () => ({ value: 'unexpected', usage: input }));
+    const budget = makeBudget({
+      dispatch: async () => ({ kind: 'conflict', reservation: { status: 'DISPATCHED' } as never }),
+      release,
+    });
+    await expect(runBudgetedStage(budget, input, execute)).rejects.toThrow(
+      'could not be dispatched',
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it('preserves the execution error if recording uncertain fails', async () => {
+    const error = new Error('execution failed');
+    const budget = makeBudget({
+      uncertain: async () => {
+        throw new Error('database offline');
+      },
+    });
+    await expect(
+      runBudgetedStage(budget, input, async () => {
+        throw error;
+      }),
+    ).rejects.toBe(error);
+  });
+
   it('dispatches and settles observed usage', async () => {
     const calls: string[] = [];
     const budget = makeBudget({

@@ -97,7 +97,8 @@ describe('ChatResponseWorkerService', () => {
   });
 
   it('does not call the generator again after a terminal success', async () => {
-    const harness = createHarness();
+    const budget = createBudgetMock();
+    const harness = createHarness(undefined, undefined, budget);
     harness.state.turn = {
       ...harness.state.turn,
       status: 'SUCCEEDED',
@@ -114,6 +115,90 @@ describe('ChatResponseWorkerService', () => {
 
     expect(harness.generator.generate).not.toHaveBeenCalled();
     expect(harness.job.discard).not.toHaveBeenCalled();
+    expect(budget.reconcileTerminal).toHaveBeenCalledWith(
+      'user_1',
+      payload.turnId,
+    );
+  });
+
+  it('recovers a post-commit reconciliation failure without publishing a false failure', async () => {
+    const budget = createBudgetMock();
+    const stream = createStreamMock();
+    const harness = createHarness(undefined, stream, budget);
+    const error = new Error('budget temporarily unavailable');
+    budget.reconcileTerminal.mockRejectedValueOnce(error);
+
+    await expect(harness.service.process(createJob())).rejects.toBe(error);
+    expect(harness.state.turn.status).toBe('SUCCEEDED');
+    expect(harness.state.backgroundJob.status).toBe('SUCCEEDED');
+    expect(stream.append.mock.calls.map((call) => call[2]?.type)).not.toContain(
+      'response_failed',
+    );
+    expect(budget.uncertain).not.toHaveBeenCalled();
+    await harness.service.process(createJob(1));
+    expect(budget.reconcileTerminal).toHaveBeenCalledTimes(2);
+    expect(harness.generator.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fail the winning job when a duplicate delivery loses the dispatch permit', async () => {
+    const budget = createBudgetMock();
+    const harness = createHarness(undefined, undefined, budget);
+    const started = deferred<void>();
+    const finish = deferred<ChatResponseGeneratorResult>();
+    harness.generator.generate.mockImplementationOnce(() => {
+      started.resolve();
+      return finish.promise;
+    });
+    budget.dispatch
+      .mockResolvedValueOnce({ kind: 'updated' })
+      .mockResolvedValue({
+        kind: 'conflict',
+        reservation: { status: 'DISPATCHED' },
+      });
+    const winning = harness.service.process(createJob());
+    try {
+      await started.promise;
+      await expect(harness.service.process(createJob())).rejects.toThrow(
+        'already dispatched',
+      );
+      expect(harness.state.turn.status).toBe('ACTIVE');
+      expect(harness.state.backgroundJob.status).toBe('ACTIVE');
+      expect(harness.generator.generate).toHaveBeenCalledTimes(1);
+      expect(budget.release).not.toHaveBeenCalled();
+    } finally {
+      finish.resolve({
+        content: 'generated answer',
+        generator: 'test-generator',
+      });
+      await winning;
+    }
+    expect(harness.state.turn.status).toBe('SUCCEEDED');
+  });
+
+  it('publishes the durable winner when another attempt fails after completion', async () => {
+    const stream = createStreamMock();
+    const harness = createHarness(undefined, stream);
+    harness.generator.generate.mockImplementationOnce(async () => {
+      harness.state.turn = {
+        ...harness.state.turn,
+        status: 'SUCCEEDED',
+        responseMessageId: 'winner-response',
+        finishedAt: new Date('2026-08-28T00:00:04.000Z'),
+      };
+      harness.state.backgroundJob = {
+        ...harness.state.backgroundJob,
+        status: 'SUCCEEDED',
+      };
+      throw new ChatResponseWorkerError(
+        'OUTPUT_INVALID',
+        false,
+        'losing attempt failed',
+      );
+    });
+    await harness.service.process(createJob(2));
+    const events = stream.append.mock.calls.map((call) => call[2]?.type);
+    expect(events).toContain('response_completed');
+    expect(events).not.toContain('response_failed');
   });
 
   it('returns a retryable generation failure to Bull while re-queuing the job', async () => {
@@ -356,6 +441,14 @@ describe('ChatResponseWorkerService', () => {
     };
   }
 
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  }
+
   function createBudgetMock() {
     return {
       findLedger: jest.fn().mockResolvedValue({
@@ -368,6 +461,7 @@ describe('ChatResponseWorkerService', () => {
       dispatch: jest.fn().mockResolvedValue({ kind: 'updated' }),
       settle: jest.fn().mockResolvedValue({ kind: 'updated' }),
       uncertain: jest.fn().mockResolvedValue({ kind: 'updated' }),
+      release: jest.fn().mockResolvedValue({ kind: 'updated' }),
       reconcileTerminal: jest.fn().mockResolvedValue(null),
     };
   }

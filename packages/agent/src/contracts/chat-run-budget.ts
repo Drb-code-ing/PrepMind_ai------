@@ -11,8 +11,13 @@ import type {
  */
 export type AgentBudgetPort = {
   reserve(input: ChatRunBudgetReservationRequest): Promise<ChatRunBudgetReservation>;
+  /** Only a fresh RESERVED -> DISPATCHED transition may return updated. */
   dispatch(ownerId: string, reservationId: string): Promise<BudgetTransition>;
-  settle(ownerId: string, reservationId: string, usage: ChatRunBudgetUsage): Promise<BudgetTransition>;
+  settle(
+    ownerId: string,
+    reservationId: string,
+    usage: ChatRunBudgetUsage,
+  ): Promise<BudgetTransition>;
   settleUncertain(
     ownerId: string,
     reservationId: string,
@@ -32,9 +37,8 @@ export type BudgetedStageInput = Omit<ChatRunBudgetReservationRequest, 'stage'> 
 };
 
 /**
- * Execute one stage with a durable reservation. Dispatch failures release the
- * reservation; provider failures mark it UNCERTAIN because execution may have
- * happened. The caller supplies bounded usage only after observing the result.
+ * Execute one stage only after winning a fresh dispatch. Unknown dispatch or
+ * provider outcomes keep the hold; only unstarted work may be released.
  */
 export async function runBudgetedStage<T>(
   budget: AgentBudgetPort,
@@ -44,7 +48,9 @@ export async function runBudgetedStage<T>(
   const reservation = await budget.reserve(input);
   const dispatched = await budget.dispatch(input.ownerId, reservation.id);
   if (dispatched.kind !== 'updated') {
-    await budget.release(input.ownerId, reservation.id);
+    if (dispatched.kind === 'conflict' && dispatched.reservation.status === 'RESERVED') {
+      await budget.release(input.ownerId, reservation.id);
+    }
     throw new Error('Agent stage budget reservation could not be dispatched');
   }
 
@@ -56,7 +62,11 @@ export async function runBudgetedStage<T>(
     }
     return result.value;
   } catch (error) {
-    await budget.uncertain(input.ownerId, reservation.id);
+    try {
+      await budget.uncertain(input.ownerId, reservation.id);
+    } catch {
+      // A failed diagnostic write leaves DISPATCHED held, never refunded.
+    }
     throw error;
   }
 }

@@ -109,7 +109,12 @@ export class ChatRunBudgetRepository {
       if (
         !ledger ||
         ledger.turnId !== validatedInput.turnId ||
-        ledger.cancelledAt
+        ledger.cancelledAt ||
+        !(await this.isTurnOpen(
+          transaction,
+          validatedInput.ownerId,
+          validatedInput.turnId,
+        ))
       ) {
         throw new Error('Chat run budget is unavailable');
       }
@@ -255,9 +260,15 @@ export class ChatRunBudgetRepository {
           heldOutputTokens: { gte: current.outputTokens },
           heldCostMicros: { gte: current.costMicros },
           usedCalls: { lte: ledger.maxCalls - 1 },
-          usedInputTokens: { lte: ledger.maxInputTokens - validatedUsage.inputTokens },
-          usedOutputTokens: { lte: ledger.maxOutputTokens - validatedUsage.outputTokens },
-          usedCostMicros: { lte: ledger.maxCostMicros - validatedUsage.costMicros },
+          usedInputTokens: {
+            lte: ledger.maxInputTokens - validatedUsage.inputTokens,
+          },
+          usedOutputTokens: {
+            lte: ledger.maxOutputTokens - validatedUsage.outputTokens,
+          },
+          usedCostMicros: {
+            lte: ledger.maxCostMicros - validatedUsage.costMicros,
+          },
         },
         data: {
           heldCalls: { decrement: 1 },
@@ -500,6 +511,14 @@ export class ChatRunBudgetRepository {
 
   async reconcileTerminal(ownerId: string, turnId: string) {
     return this.runSerializable(async (transaction) => {
+      const turn = await transaction.chatTurn.findUnique({
+        where: { id_userId: { id: turnId, userId: ownerId } },
+        select: { status: true },
+      });
+      if (!turn) return null;
+      if (turn.status === 'QUEUED' || turn.status === 'ACTIVE') {
+        throw new Error('Chat run budget turn is not terminal');
+      }
       const ledger = await transaction.chatRunBudget.findUnique({
         where: { turnId_userId: { turnId, userId: ownerId } },
       });
@@ -563,10 +582,20 @@ export class ChatRunBudgetRepository {
         where: { id_userId: { id: reservationId, userId: ownerId } },
       });
       if (!current) return { kind: 'not-found' } as const;
-      if (current.status === status)
-        return { kind: 'updated', reservation: current } as const;
+      // An existing dispatch is not permission to execute the provider again.
       if (current.status !== 'RESERVED')
         return { kind: 'conflict', reservation: current } as const;
+      const ledger = await transaction.chatRunBudget.findUnique({
+        where: { id_userId: { id: current.ledgerId, userId: ownerId } },
+      });
+      if (
+        !ledger ||
+        ledger.cancelledAt ||
+        ledger.turnId !== current.turnId ||
+        !(await this.isTurnOpen(transaction, ownerId, current.turnId))
+      ) {
+        return { kind: 'conflict', reservation: current } as const;
+      }
       const reservation = await transaction.chatRunBudgetReservation.update({
         where: { id_userId: { id: reservationId, userId: ownerId } },
         data: { status, dispatchedAt: new Date() },
@@ -583,6 +612,18 @@ export class ChatRunBudgetRepository {
       });
       return { kind: 'updated', reservation } as const;
     });
+  }
+
+  private async isTurnOpen(
+    transaction: Prisma.TransactionClient,
+    ownerId: string,
+    turnId: string,
+  ) {
+    const turn = await transaction.chatTurn.findUnique({
+      where: { id_userId: { id: turnId, userId: ownerId } },
+      select: { status: true },
+    });
+    return turn?.status === 'QUEUED' || turn?.status === 'ACTIVE';
   }
 
   private async runSerializable<T>(

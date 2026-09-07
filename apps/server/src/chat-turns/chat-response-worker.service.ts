@@ -103,11 +103,16 @@ type ClaimResult =
       backgroundJob: BackgroundJob;
     };
 
-type FailureDecision = 'retry' | 'complete';
+type FailureDecision =
+  | 'retry'
+  | 'complete'
+  | Extract<ClaimResult, { kind: 'terminal' }>;
 
 const CHAT_RESPONSE_WORKER_VERSION = 'chat-response-worker-v1';
 const MAX_SERIALIZABLE_ATTEMPTS = 3;
 const INPUT_CONTENT_MAX_LENGTH = 100_000;
+
+class ChatResponseBudgetAlreadyDispatchedError extends Error {}
 
 @Injectable()
 export class ChatResponseWorkerService {
@@ -130,6 +135,7 @@ export class ChatResponseWorkerService {
     const bullJobId = String(job.id);
     const claim = await this.claim(payload, bullJobId, attemptNumber(job));
     if (claim.kind === 'terminal') {
+      await this.budgets?.reconcileTerminal(claim.turn.userId, claim.turn.id);
       await this.publishDurableTerminal(claim.turn, claim.backgroundJob);
       return;
     }
@@ -137,6 +143,7 @@ export class ChatResponseWorkerService {
     await this.publishStarted(claim.claim.turn);
     let generatedTextObserved = false;
     let workerReservationId: string | null = null;
+    let terminalCommitted = false;
     try {
       const messages = await this.loadInputMessages(claim.claim.turn);
       workerReservationId = await this.reserveWorkerBudget(
@@ -165,6 +172,7 @@ export class ChatResponseWorkerService {
         );
       }
       await this.commitSuccess(payload, claim.claim, generated, bullJobId);
+      terminalCommitted = true;
       await this.budgets?.reconcileTerminal(
         claim.claim.turn.userId,
         claim.claim.turn.id,
@@ -175,6 +183,13 @@ export class ChatResponseWorkerService {
         chatResponseMessageId(claim.claim.turn.id),
       );
     } catch (error) {
+      // Publication/reconciliation retries and losing deliveries must not rewrite job facts.
+      if (
+        terminalCommitted ||
+        error instanceof ChatResponseBudgetAlreadyDispatchedError
+      ) {
+        throw error;
+      }
       if (workerReservationId && this.budgets) {
         try {
           await this.budgets.uncertain(
@@ -193,6 +208,18 @@ export class ChatResponseWorkerService {
         bullJobId,
       );
       if (decision === 'retry') throw error;
+      if (decision !== 'complete') {
+        await this.budgets?.reconcileTerminal(
+          decision.turn.userId,
+          decision.turn.id,
+        );
+        await this.publishDurableTerminal(
+          decision.turn,
+          decision.backgroundJob,
+        );
+        job.discard();
+        return;
+      }
       await this.budgets?.reconcileTerminal(
         claim.claim.turn.userId,
         claim.claim.turn.id,
@@ -234,6 +261,16 @@ export class ChatResponseWorkerService {
     });
     const dispatched = await this.budgets.dispatch(turn.userId, reservation.id);
     if (dispatched.kind !== 'updated') {
+      if (
+        dispatched.kind === 'conflict' &&
+        ['DISPATCHED', 'UNCERTAIN', 'SETTLED'].includes(
+          dispatched.reservation.status,
+        )
+      ) {
+        throw new ChatResponseBudgetAlreadyDispatchedError(
+          'Chat response worker budget already dispatched',
+        );
+      }
       await this.budgets.release(turn.userId, reservation.id);
       throw new ChatResponseWorkerError(
         'BUDGET_EXHAUSTED',
@@ -778,7 +815,7 @@ export class ChatResponseWorkerService {
       return 'retry';
     }
 
-    await this.runSerializable(async (transaction) => {
+    const terminal = await this.runSerializable(async (transaction) => {
       const turnRecord = await transaction.chatTurn.findUnique({
         where: { id: payload.turnId },
       });
@@ -795,7 +832,7 @@ export class ChatResponseWorkerService {
       const backgroundJob = linked.backgroundJob;
       if (isTerminalTurn(turn.status)) {
         await reconcileTerminalBackgroundJob(transaction, turn, backgroundJob);
-        return;
+        return { kind: 'terminal', turn, backgroundJob } as const;
       }
 
       const now = await readDatabaseClock(transaction);
@@ -828,7 +865,11 @@ export class ChatResponseWorkerService {
             throw stateMismatch('ChatTurn failure CAS lost its paired facts');
           }
           await reconcileTerminalBackgroundJob(transaction, winner, currentJob);
-          return;
+          return {
+            kind: 'terminal',
+            turn: winner,
+            backgroundJob: currentJob,
+          } as const;
         }
         if (
           !winner ||
@@ -891,7 +932,7 @@ export class ChatResponseWorkerService {
         update: {},
       });
     });
-    return 'complete';
+    return terminal ?? 'complete';
   }
 
   private async runSerializable<T>(

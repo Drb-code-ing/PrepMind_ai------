@@ -1,6 +1,6 @@
 # Phase 6 Agent Runtime Audit
 
-更新时间：2026-09-05
+更新时间：2026-09-07
 范围：Phase 6 全部 Agent、模型 gate、通信边界、权限、预算、Trace、降级和现有证据。  
 结论级别：本文件是审计基线，不代表所有 Agent 已完成真实模型验收。
 
@@ -17,10 +17,10 @@ consumer 也不是真正 SSE push；完整 ledger 和真实模型 Worker 仍未�
 `docs/acceptance/phase-6-chat-response-worker.md`、`docs/acceptance/phase-6-chat-stream-replay.md` 与
 `docs/acceptance/phase-6-chat-turn-browser-replay.md`。
 
-2026-09-05 ticket 05 的第一切片冻结了 `@repo/types` ChatRunBudget 共享合同：所有 Chat stage 使用 owner/turn-bound ledger、bounded
-reservation/usage/event，并由 strict schema 校验生命周期、时间顺序、`used + held <= policy` 和敏感字段排除。该切片只证明
-`implemented + mock/static validated`，Prisma schema/migration、runtime repository 和 Worker `WORKER` reservation 已落地，但真实数据库
-并发证据、其他 Agent stage、Trace reconciliation 和真实模型结算仍未完成。
+2026-09-07 ticket 05 dispatch/recovery 切片进一步冻结 ChatRunBudget 运行时边界：重复 dispatch 不会再次授予执行许可，活跃/排队 turn
+禁止提前终态对账，终态竞争失败方复用 durable winner，terminal replay 会再次执行 reconciliation；repository/Worker focused Jest `28/28`、
+agent 全量 `1703/1703`、build/typecheck/lint 均通过。隔离 PostgreSQL crash/concurrency 脚本已加入但 Docker daemon 当前不可用，故该项
+仍无本轮真实数据库回执；其他 Agent stage、Trace reconciliation 和真实模型结算仍未完成。
 验收记录见 `docs/acceptance/phase-6-chat-run-budget-contract.md`。
 
 2026-09-04 的 ticket 01 又在同一 durable 写边界之上补齐认证 `POST /chat-turns`：请求由 strict shared Zod contract
