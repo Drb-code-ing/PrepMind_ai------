@@ -20,7 +20,7 @@
 >
 > 修正重复 Bull 投递、终态提前对账和终态竞争失败三类生产边界。已 dispatch 的 reservation 不再授予第二次 provider 执行许可；`reconcileTerminal()` 仅接受 `SUCCEEDED/FAILED/CANCELLED` turn，并保留活跃 turn 的 held 预算；并发失败方复用已提交的 durable winner，terminal replay 会再次尝试预算对账。新增 repository/Worker 回归覆盖重复 dispatch、取消竞态、活动 turn guard、terminal winner 和 reserve/dispatch 后崩溃恢复语义。`apps/server` focused Jest `28/28`、`@repo/agent` 全量 `1703/1703`、build、typecheck、lint 和 `git diff --check` 通过。
 >
-> 新增 `apps/server/scripts/chat-run-budget-postgres-check.ts`，用于临时 tmpfs PostgreSQL 的跨节点竞争与 crash/recovery 验收；本轮 Docker Desktop daemon 不可用（`dockerDesktopLinuxEngine` pipe 缺失），未执行脚本，不影响既有容器/卷/Redis/MinIO，未读取 `.env` 或调用 Provider。证据等级为 `implemented + mock/static validated`，并保留既有真实单 ledger PostgreSQL 并发证据。功能分支待提交、推送、合并 `main` 后复验。
+> 新增 `apps/server/scripts/chat-run-budget-postgres-check.ts`，用于临时 tmpfs PostgreSQL 的同机多 PrismaClient 竞争与 crash/recovery 验收；本轮 Docker Desktop daemon 不可用（`dockerDesktopLinuxEngine` pipe 缺失），未执行脚本，不影响既有容器/卷/Redis/MinIO，未读取 `.env` 或调用 Provider。证据等级为 `implemented + mock/static validated`，并保留既有真实单 ledger PostgreSQL 并发证据。该脚本不覆盖多 Worker、跨主机或网络中断恢复。功能分支待提交、推送、合并 `main` 后复验。
 
 > 2026-09-05 — Ticket 05 真实 PostgreSQL 并发验收切片：
 >
