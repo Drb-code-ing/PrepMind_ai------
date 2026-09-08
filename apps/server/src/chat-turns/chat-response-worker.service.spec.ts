@@ -13,6 +13,7 @@ import {
 import {
   ChatResponseWorkerError,
   ChatResponseWorkerService,
+  shouldRetrieveForRoute,
   type ChatResponseGenerator,
   type ChatResponseGeneratorResult,
 } from './chat-response-worker.service';
@@ -26,6 +27,11 @@ describe('ChatResponseWorkerService', () => {
     inputHash: `sha256:${'a'.repeat(64)}`,
     budgetPolicyVersion: 'chat-budget-v1',
   } as const;
+
+  it('retrieves only when the canonical route requires RAG', () => {
+    expect(shouldRetrieveForRoute({ name: 'rag_answer', confidence: 1, reason: '资料', requiresRag: true, requiresHumanApproval: false })).toBe(true);
+    expect(shouldRetrieveForRoute({ name: 'rag_answer', confidence: 1, reason: '普通', requiresRag: false, requiresHumanApproval: false })).toBe(false);
+  });
 
   it('claims, generates, and atomically records the assistant response', async () => {
     const harness = createHarness();
