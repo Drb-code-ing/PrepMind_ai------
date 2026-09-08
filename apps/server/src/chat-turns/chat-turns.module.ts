@@ -33,6 +33,11 @@ import { ChatTurnsRepository } from './chat-turns.repository';
 import { ChatRunBudgetRepository } from '../chat-run-budget/chat-run-budget.repository';
 import { ChatRunBudgetStageRunner } from './chat-run-budget-stage-runner';
 import { ChatRetrieverStageService } from './chat-retriever-stage';
+import {
+  CHAT_KNOWLEDGE_VERIFIER_RUNTIME,
+  ChatVerifierStageService,
+  createChatVerifierStageRuntime,
+} from './chat-verifier-stage';
 
 export function createChatResponseWorkerProviders(
   role: ServerEnv['SERVER_ROLE'],
@@ -80,6 +85,7 @@ const chatResponseWorkerProviders = createChatResponseWorkerProviders(
     ChatRunBudgetStageRunner,
     ChatRouterStageService,
     ChatRetrieverStageService,
+    ChatVerifierStageService,
     {
       provide: CHAT_ROUTER_RUNTIME,
       inject: [ConfigService],
@@ -95,6 +101,26 @@ const chatResponseWorkerProviders = createChatResponseWorkerProviders(
           DEEPSEEK_API_KEY: config.get('DEEPSEEK_API_KEY', { infer: true }),
           AI_BASE_URL: config.get('AI_BASE_URL', { infer: true }),
           AI_MODEL: config.get('AI_MODEL', { infer: true }),
+        }),
+    },
+    {
+      provide: CHAT_KNOWLEDGE_VERIFIER_RUNTIME,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<ServerEnv, true>) =>
+        createChatVerifierStageRuntime({
+          AI_PROVIDER_MODE: config.get('AI_PROVIDER_MODE', { infer: true }),
+          AI_ENABLE_LIVE_CALLS: config.get('AI_ENABLE_LIVE_CALLS', {
+            infer: true,
+          }),
+          KNOWLEDGE_VERIFIER_MODEL_ENABLED: config.get(
+            'KNOWLEDGE_VERIFIER_MODEL_ENABLED',
+            { infer: true },
+          ),
+          KNOWLEDGE_AGENT_DEEPSEEK_API_KEY: config.get(
+            'KNOWLEDGE_AGENT_DEEPSEEK_API_KEY',
+            { infer: true },
+          ),
+          AI_BASE_URL: config.get('AI_BASE_URL', { infer: true }),
         }),
     },
     DeterministicChatResponseGenerator,

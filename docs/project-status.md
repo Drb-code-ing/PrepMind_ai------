@@ -7,8 +7,8 @@
 
 PrepMind 的产品基础和大部分 Agent 合同已经落地，但 **Phase 6 Agent 运行时总审计仍未结束**。当前最新维护任务恢复了本地
 Worker readiness：BullMQ 保留的历史失败只有在已被更新成功覆盖时才不再阻断流量，失败计数仍可观测；本机 CLI 也已统一到
-Bun。此前完成的 `/agent-trace` Mock/Live 切换和 durable ChatTurn 浏览器恢复仍有效。Worker 仍是 deterministic baseline，
-也不是真实模型 Worker。
+Bun。此前完成的 `/agent-trace` Mock/Live 切换和 durable ChatTurn 浏览器恢复仍有效。Worker 现在具备 Router/Retriever/Verifier
+stage wiring；最终回答 generator 仍是 deterministic baseline，也不是真实模型 Worker。
 
 ## 当前基线
 
@@ -30,11 +30,11 @@ Bun。此前完成的 `/agent-trace` Mock/Live 切换和 durable ChatTurn 浏览
 | --------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | 产品基础                    | 已实现并有阶段验收                                                                                            | 真实部署仍需独立环境检查                                                            |
 | RAG                         | Qwen `text-embedding-v4` / 1536；向量 + PostgreSQL full-text hybrid rank                                      | 当前没有 reranker；`fake` 只用于非生产测试                                          |
-| Router / Verifier           | Router 已进入 Server Worker stage 路径；混合路径仍由确定性安全门优先                                                                              | Router 产品真实模型 smoke 与 Verifier Server 注入仍待完成 |
+| Router / Verifier           | Router 与 Verifier 均进入 Server Worker stage 路径；确定性安全门优先，Verifier 可选 DeepSeek candidate                 | 产品真实模型 smoke、跨节点 ledger/Trace 对账仍待完成 |
 | Tutor / Organizer           | 受限 candidate、权限与本地 merger 已实现，历史语义/产品证据分开保存                                           | 真实模型质量与产品 gate 仍需逐项确认                                                |
 | Review / Planner            | 只读建议与受限 candidate 已实现                                                                               | 共享 ledger、持续运行证据和独立产品 Live 仍待补齐                                   |
 | Knowledge Dedup / Organizer | owner-scoped shortlist、受限 candidate 与 deterministic fallback 已实现                                       | 需要最新矩阵确认真实产品 smoke 状态                                                 |
-| Retriever / FinalResponse   | Worker 的 `rag_answer` 路径已调用 owner-bound Retriever projection，并将结果送入 deterministic Verifier | 不能据此证明上游每个 Agent 或 SLA；Verifier model candidate、embedding/provider 生产证据仍待验证 |
+| Retriever / FinalResponse   | Worker 的 `rag_answer` 路径调用 owner-bound Retriever projection，再进入 Verifier stage；默认 deterministic、可选 DeepSeek candidate | 不能据此证明上游每个 Agent 或 SLA；Verifier/最终回答真实模型与 embedding/provider 生产证据仍待验证 |
 | Chat response worker        | Outbox -> BullMQ -> claim -> durable terminal commit；Stream contract、Redis bounded replay 和状态查询已实现  | 当前 generator 是 `deterministic-worker-v1`；全链路 ledger、真实模型 Worker 未完成  |
 | ChatRunBudget 合同          | `@repo/types`、Prisma schema/migration、owner-scoped repository、Worker/Router reservation/settlement/terminal reconcile、显式 UNCERTAIN recovery、dispatch 单胜者、终态 guard、Server turn-bound stage runner、`@repo/agent` typed budget port 与隔离 PostgreSQL 同机多 client 并发及子进程 post-commit crash 验收已实现 | 多 Worker/跨主机/网络故障恢复、Tutor/Retriever/Verifier/FinalResponse stage 注入、Trace 对账和真实模型结算未完成 |
 | ChatTurn product bridge     | gate-on 后 prepare/enqueue/`202`；浏览器 owner-bound status + JSON cursor replay、刷新恢复和 status-only 降级 | gate 默认关闭；首轮保留 legacy；当前不是长连接 BFF SSE push，也不是生产持续运行证据 |
@@ -54,7 +54,7 @@ Bun。此前完成的 `/agent-trace` Mock/Live 切换和 durable ChatTurn 浏览
 ## 下一步顺序
 
 1. 完成 Phase 6 Agent 审计：逐项确认通信、owner/权限、并发、预算 ledger、取消、Trace 和真实模型产品 smoke。
-2. 继续补齐其他 Agent stage 和 Trace 对账（ticket 05），复用 Server turn-bound stage runner；Router、Retriever Worker RAG 调用和 deterministic Verifier 已完成，下一步接入 Verifier model candidate。
+2. 继续补齐其他 Agent stage 和 Trace 对账（ticket 05），复用 Server turn-bound stage runner；Router、Retriever Worker RAG 调用和 Verifier model-stage wiring 已完成，下一步接入 FinalResponse 独立预算与真实模型 generator。
    ChatRunBudget 同机多 client 并发与子进程 post-commit crash/reconciliation 证据已封存，多 Worker/跨主机/网络故障恢复仍待专门验收。
 3. 为 Chat Worker 接入独立真实模型 gate、usage/cost 记录和产品 controlled smoke（ticket 06）；继续保持默认 mock/off。
 4. 以负载和延迟数据评估是否另做真正 SSE push；ticket 04 当前是 JSON replay/polling，不伪称 SSE。

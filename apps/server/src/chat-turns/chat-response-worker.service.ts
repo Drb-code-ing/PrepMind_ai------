@@ -9,7 +9,10 @@ import {
 import type { Job } from 'bullmq';
 import { createHash } from 'node:crypto';
 import type { RouterResult } from '@repo/types/api/agent';
-import { verifyKnowledgeChunks, type KnowledgeVerifierResult } from '@repo/agent/knowledge-verifier';
+import {
+  verifyKnowledgeChunks,
+  type KnowledgeVerifierResult,
+} from '@repo/agent/knowledge-verifier';
 
 import {
   CHAT_RESPONSE_COMPLETED_EVENT,
@@ -40,6 +43,7 @@ import {
 } from '@repo/agent/chat-run-budget';
 import { ChatRouterStageService } from './chat-router-stage';
 import { ChatRetrieverStageService } from './chat-retriever-stage';
+import { ChatVerifierStageService } from './chat-verifier-stage';
 
 export const CHAT_RESPONSE_GENERATOR = Symbol('CHAT_RESPONSE_GENERATOR');
 
@@ -137,6 +141,7 @@ export class ChatResponseWorkerService {
     @Optional() private readonly budgetRunner?: ChatRunBudgetStageRunner,
     @Optional() private readonly routerStage?: ChatRouterStageService,
     @Optional() private readonly retrieverStage?: ChatRetrieverStageService,
+    @Optional() private readonly verifierStage?: ChatVerifierStageService,
   ) {}
 
   async process(job: Job<unknown>): Promise<void> {
@@ -241,12 +246,12 @@ export class ChatResponseWorkerService {
     return scope.run(
       'WORKER',
       {
-        inputTokens: Math.min(
-          scope.limits.maxInputTokens,
-          estimateTokens(messages.map((message) => message.content).join('\n')),
-        ),
-        outputTokens: Math.min(scope.limits.maxOutputTokens, 2_800),
-        costMicros: Math.min(scope.limits.maxCostMicros, 100_000),
+        // WORKER is a durable execution lease. Child model stages reserve
+        // their own bounded budgets; reserving the whole ledger here would
+        // starve Router/Verifier and make the enabled path fail closed.
+        inputTokens: 0,
+        outputTokens: 0,
+        costMicros: 0,
       },
       async () => {
         const router = await this.routerStage?.run({
@@ -254,28 +259,44 @@ export class ChatResponseWorkerService {
           turnId: turn.id,
           policyVersion: turn.budgetPolicyVersion,
           attempt,
-          text: messages
-            .filter((message) => message.role === 'USER')
-            .at(-1)?.content ?? '',
+          text:
+            messages.filter((message) => message.role === 'USER').at(-1)
+              ?.content ?? '',
         });
         let verifierResult: KnowledgeVerifierResult | undefined;
-        if (router && shouldRetrieveForRoute(router.route) && this.retrieverStage) {
+        if (
+          router &&
+          shouldRetrieveForRoute(router.route) &&
+          this.retrieverStage
+        ) {
           const retrieved = await this.retrieverStage.run({
             ownerId: turn.userId,
             query:
-              messages
-                .filter((message) => message.role === 'USER')
-                .at(-1)?.content ?? '',
+              messages.filter((message) => message.role === 'USER').at(-1)
+                ?.content ?? '',
           });
-          verifierResult = verifyKnowledgeChunks({
-            query:
-              messages
-                .filter((message) => message.role === 'USER')
-                .at(-1)?.content ?? '',
-            chunks: [...retrieved.chunks],
-          });
+          const query =
+            messages.filter((message) => message.role === 'USER').at(-1)
+              ?.content ?? '';
+          verifierResult = this.verifierStage
+            ? (
+                await this.verifierStage.run({
+                  ownerId: turn.userId,
+                  turnId: turn.id,
+                  policyVersion: turn.budgetPolicyVersion,
+                  attempt,
+                  query,
+                  chunks: [...retrieved.chunks],
+                })
+              ).result
+            : verifyKnowledgeChunks({ query, chunks: [...retrieved.chunks] });
         }
-        const value = await this.generate(turn, messages, router?.route, verifierResult);
+        const value = await this.generate(
+          turn,
+          messages,
+          router?.route,
+          verifierResult,
+        );
         validateGeneratedResult(value);
         return {
           value,
