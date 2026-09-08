@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 
 import {
   AgentBudgetDispatchError,
+  AgentBudgetUncertainResult,
   runBudgetedStage,
   type AgentBudgetPort,
 } from '../src/contracts/chat-run-budget';
@@ -103,6 +104,27 @@ describe('runBudgetedStage', () => {
         throw new Error('provider failed');
       }),
     ).rejects.toThrow('provider failed');
+    expect(calls).toEqual(['uncertain']);
+  });
+
+  it('returns an explicit fallback while retaining the dispatched hold', async () => {
+    const calls: string[] = [];
+    const budget = makeBudget({
+      uncertain: async () => {
+        calls.push('uncertain');
+        return { kind: 'updated', reservation: {} as never };
+      },
+      settle: async () => {
+        calls.push('settle');
+        return { kind: 'updated', reservation: {} as never };
+      },
+    });
+
+    await expect(
+      runBudgetedStage(budget, input, async () => {
+        throw new AgentBudgetUncertainResult('deterministic fallback');
+      }),
+    ).resolves.toBe('deterministic fallback');
     expect(calls).toEqual(['uncertain']);
   });
 });

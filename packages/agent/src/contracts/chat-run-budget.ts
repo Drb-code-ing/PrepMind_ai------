@@ -47,6 +47,18 @@ export class AgentBudgetAdmissionError extends Error {
   }
 }
 
+/**
+ * A stage can keep its deterministic fallback while retaining a dispatched
+ * provider hold as UNCERTAIN. This is for callers that have an explicit safe
+ * fallback but cannot prove whether the provider consumed tokens.
+ */
+export class AgentBudgetUncertainResult<T> extends Error {
+  constructor(readonly value: T) {
+    super('Agent stage provider outcome is uncertain; deterministic fallback retained');
+    this.name = 'AgentBudgetUncertainResult';
+  }
+}
+
 export type BudgetedStageInput = Omit<ChatRunBudgetReservationRequest, 'stage'> & {
   stage: ChatRunBudgetStage;
 };
@@ -88,6 +100,7 @@ export async function runBudgetedStage<T>(
     } catch {
       // A failed diagnostic write leaves DISPATCHED held, never refunded.
     }
+    if (error instanceof AgentBudgetUncertainResult) return error.value;
     throw error;
   }
 }
