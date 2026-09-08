@@ -9,6 +9,7 @@ import {
 import type { Job } from 'bullmq';
 import { createHash } from 'node:crypto';
 import type { RouterResult } from '@repo/types/api/agent';
+import { verifyKnowledgeChunks, type KnowledgeVerifierResult } from '@repo/agent/knowledge-verifier';
 
 import {
   CHAT_RESPONSE_COMPLETED_EVENT,
@@ -57,6 +58,7 @@ export type ChatResponseGeneratorInput = Readonly<{
   budgetPolicyVersion: string;
   signal: AbortSignal;
   route?: RouterResult;
+  verifierResult?: KnowledgeVerifierResult;
 }>;
 
 export type ChatResponseGeneratorResult = Readonly<{
@@ -256,16 +258,24 @@ export class ChatResponseWorkerService {
             .filter((message) => message.role === 'USER')
             .at(-1)?.content ?? '',
         });
-        if (router && shouldRetrieveForRoute(router.route)) {
-          await this.retrieverStage?.run({
+        let verifierResult: KnowledgeVerifierResult | undefined;
+        if (router && shouldRetrieveForRoute(router.route) && this.retrieverStage) {
+          const retrieved = await this.retrieverStage.run({
             ownerId: turn.userId,
             query:
               messages
                 .filter((message) => message.role === 'USER')
                 .at(-1)?.content ?? '',
           });
+          verifierResult = verifyKnowledgeChunks({
+            query:
+              messages
+                .filter((message) => message.role === 'USER')
+                .at(-1)?.content ?? '',
+            chunks: [...retrieved.chunks],
+          });
         }
-        const value = await this.generate(turn, messages, router?.route);
+        const value = await this.generate(turn, messages, router?.route, verifierResult);
         validateGeneratedResult(value);
         return {
           value,
@@ -568,6 +578,7 @@ export class ChatResponseWorkerService {
     turn: ChatTurn,
     messages: readonly ChatResponseInputMessage[],
     route?: RouterResult,
+    verifierResult?: KnowledgeVerifierResult,
   ) {
     const controller = new AbortController();
     const timeoutMs = readGenerationTimeoutMs();
@@ -580,6 +591,7 @@ export class ChatResponseWorkerService {
       budgetPolicyVersion: turn.budgetPolicyVersion,
       signal: controller.signal,
       ...(route ? { route } : {}),
+      ...(verifierResult ? { verifierResult } : {}),
     });
     try {
       return await new Promise<ChatResponseGeneratorResult>(
