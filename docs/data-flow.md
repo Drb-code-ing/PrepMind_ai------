@@ -47,6 +47,9 @@ Redis 不可用或 cursor 过期后进入 status-only，最终只接受 PostgreS
 POST /chat-turns admission
   -> Outbox requested bridge
   -> ChatResponseWorker owner claim
+  -> Router stage (deterministic; optional gated candidate)
+  -> rag_answer: owner-bound Retriever projection -> deterministic Verifier
+       -> optional gated DeepSeek Verifier candidate (shared ChatRunBudget ledger)
   -> response_started
   -> bounded text_delta events
   -> PostgreSQL transaction:
@@ -66,7 +69,8 @@ POST /chat-turns admission
 
 Stream key 只保存 `sha256(userId + NUL + turnId)`，事件正文通过 `chat-turn-stream-v1` strict schema 限长；Lua append 同时保证
 sequence、event id/hash 幂等、终态封锁、trim 与 TTL。Redis/BullMQ 是 bounded transport，不替代 PostgreSQL，也不进入 Outbox。Worker
-当前 generator 仍是 `deterministic-worker-v1`。服务端传输层证据仍是 `implemented`/`mock-static validated`；ticket 04 另有 Mock
+Verifier stage 默认 deterministic，显式 gate 且严格 DeepSeek 配置满足时才运行 `deepseek-v4-pro` candidate；当前最终 generator
+仍是 `deterministic-worker-v1`。服务端传输层证据仍是 `implemented`/`mock-static validated`；ticket 04 另有 Mock
 Docker/可见浏览器产品验收。当前 consumer 是 JSON polling，不是真正 SSE push。实现与回归见
 [`docs/acceptance/phase-6-chat-stream-replay.md`](acceptance/phase-6-chat-stream-replay.md) 与
 [`docs/acceptance/phase-6-chat-turn-browser-replay.md`](acceptance/phase-6-chat-turn-browser-replay.md)。
