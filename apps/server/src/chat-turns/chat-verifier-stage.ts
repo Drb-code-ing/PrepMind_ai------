@@ -5,6 +5,9 @@ import {
   type ModelAgentRuntime,
 } from '@repo/ai';
 import {
+  AgentBudgetUncertainResult,
+} from '@repo/agent/chat-run-budget';
+import {
   isKnowledgeVerifierModelEligible,
   runKnowledgeVerifierModelCandidate,
   type KnowledgeVerifierModelCandidateEnvelope,
@@ -127,25 +130,30 @@ export class ChatVerifierStageService {
             envelope.observation.disposition === 'fallback_runtime_error' ||
             envelope.observation.disposition === 'fallback_timeout' ||
             !usageWithinCap);
-        return {
-          value: {
+        const value = {
             result: envelope.result,
             observation: envelope.observation,
             degraded: envelope.observation.disposition !== 'candidate_applied',
-          },
+          } satisfies ChatVerifierStageResult;
+        const usage = unknownOutcome
+          ? {
+              inputTokens: INPUT_TOKENS,
+              outputTokens: OUTPUT_TOKENS,
+              costMicros: REQUEST_CAP_MICROS,
+            }
+          : {
+              inputTokens: envelope.observation.usage.inputTokens,
+              outputTokens: envelope.observation.usage.outputTokens,
+              costMicros: calculatedCostMicros,
+            };
+        if (unknownOutcome) {
+          throw new AgentBudgetUncertainResult(value);
+        }
+        return {
+          value,
           // A dispatched call with no trustworthy usage must retain its full
           // hold rather than settling it as a free provider request.
-          usage: unknownOutcome
-            ? {
-                inputTokens: INPUT_TOKENS,
-                outputTokens: OUTPUT_TOKENS,
-                costMicros: REQUEST_CAP_MICROS,
-              }
-            : {
-                inputTokens: envelope.observation.usage.inputTokens,
-                outputTokens: envelope.observation.usage.outputTokens,
-                costMicros: calculatedCostMicros,
-              },
+          usage,
         };
       },
     );

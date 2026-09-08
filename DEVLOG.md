@@ -12,6 +12,12 @@
 > 证据等级：`implemented + mock/static validated`；尚未执行 controlled-Live、产品真实模型 smoke 或 Docker 验收。功能分支待提交、推送、合并
 > `main` 后复验。
 
+> 2026-09-08 — Verifier unknown-outcome recovery follow-up：
+>
+> 增加 `AgentBudgetUncertainResult`，使 Verifier 在 deterministic fallback 可继续回答时把已 dispatch 的 child reservation 转为
+> `UNCERTAIN`，而不是把无 usage 的 Provider 失败结算成零成本；只有 `candidate_applied` 且 usage 在 DeepSeek pro 价格上限内才正常结算。
+> Agent budget `5/5` 通过；该补丁未调用 Provider、未读取凭据、未触碰 Docker 数据。
+
 > 2026-09-07 — Ticket 05 Server turn-bound stage runner 原子切片：
 >
 > 从 `main=d3fe9827` 建立 `drb/chat-budget-stage-runner`。新增 `ChatRunBudgetStageRunner`，由 Server 固定 owner、turn、policy、attempt，
