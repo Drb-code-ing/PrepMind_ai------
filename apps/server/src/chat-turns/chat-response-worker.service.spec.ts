@@ -19,6 +19,9 @@ import {
 } from './chat-response-worker.service';
 import type { ChatStreamStore } from './chat-stream.store';
 import { ChatRunBudgetStageRunner } from './chat-run-budget-stage-runner';
+import type { ChatRouterStageService } from './chat-router-stage';
+import type { ChatRetrieverStageService } from './chat-retriever-stage';
+import type { ChatVerifierStageService } from './chat-verifier-stage';
 
 describe('ChatResponseWorkerService', () => {
   const payload = {
@@ -29,8 +32,24 @@ describe('ChatResponseWorkerService', () => {
   } as const;
 
   it('retrieves only when the canonical route requires RAG', () => {
-    expect(shouldRetrieveForRoute({ name: 'rag_answer', confidence: 1, reason: '资料', requiresRag: true, requiresHumanApproval: false })).toBe(true);
-    expect(shouldRetrieveForRoute({ name: 'rag_answer', confidence: 1, reason: '普通', requiresRag: false, requiresHumanApproval: false })).toBe(false);
+    expect(
+      shouldRetrieveForRoute({
+        name: 'rag_answer',
+        confidence: 1,
+        reason: '资料',
+        requiresRag: true,
+        requiresHumanApproval: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRetrieveForRoute({
+        name: 'rag_answer',
+        confidence: 1,
+        reason: '普通',
+        requiresRag: false,
+        requiresHumanApproval: false,
+      }),
+    ).toBe(false);
   });
 
   it('claims, generates, and atomically records the assistant response', async () => {
@@ -68,6 +87,79 @@ describe('ChatResponseWorkerService', () => {
       expect.objectContaining({ costMicros: 0 }),
     );
     expect(budget.uncertain).not.toHaveBeenCalled();
+  });
+
+  it('passes the owner-bound retrieved evidence through the Verifier stage', async () => {
+    const router = {
+      run: jest.fn().mockResolvedValue({
+        route: {
+          name: 'rag_answer',
+          confidence: 1,
+          reason: '资料',
+          requiresRag: true,
+          requiresHumanApproval: false,
+        },
+        observation: {},
+      }),
+    } as unknown as ChatRouterStageService;
+    const retriever = {
+      run: jest.fn().mockResolvedValue({
+        chunks: [
+          {
+            documentId: 'doc_1',
+            documentTitle: 'Vector notes',
+            chunkId: 'chunk_1',
+            content: 'A bounded evidence excerpt.',
+            score: 0.95,
+          },
+        ],
+        degraded: false,
+      }),
+    } as unknown as ChatRetrieverStageService;
+    const verifier = {
+      run: jest.fn().mockResolvedValue({
+        result: {
+          status: 'trusted',
+          reason: 'verified',
+          promptAddition: 'Use the excerpt.',
+          debug: {
+            checkedChunkCount: 1,
+            lowScoreChunkCount: 0,
+            conflictSignals: [],
+            suspiciousSignals: [],
+          },
+        },
+        observation: {},
+        degraded: false,
+      }),
+    } as unknown as ChatVerifierStageService;
+    const harness = createHarness(
+      undefined,
+      undefined,
+      createBudgetMock(),
+      router,
+      retriever,
+      verifier,
+    );
+
+    await harness.service.process(createJob());
+
+    expect(verifier.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerId: 'user_1',
+        turnId: payload.turnId,
+        query: 'What is a vector?',
+        chunks: expect.arrayContaining([
+          expect.objectContaining({ chunkId: 'chunk_1' }),
+        ]),
+      }),
+    );
+    expect(harness.generator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: expect.objectContaining({ name: 'rag_answer' }),
+        verifierResult: expect.objectContaining({ status: 'trusted' }),
+      }),
+    );
   });
 
   it('fails closed rather than generating without a missing durable ledger', async () => {
@@ -435,6 +527,9 @@ describe('ChatResponseWorkerService', () => {
     generatorError?: Error,
     stream?: ReturnType<typeof createStreamMock>,
     budget?: ReturnType<typeof createBudgetMock>,
+    router?: ChatRouterStageService,
+    retriever?: ChatRetrieverStageService,
+    verifier?: ChatVerifierStageService,
   ) {
     const state = {
       turn: makeTurn(),
@@ -511,6 +606,9 @@ describe('ChatResponseWorkerService', () => {
       stream as never,
       budget as never,
       budget ? new ChatRunBudgetStageRunner(budget as never) : undefined,
+      router,
+      retriever,
+      verifier,
     );
     return {
       service,

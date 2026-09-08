@@ -1,5 +1,17 @@
 # PrepMind AI 开发日志
 
+> 2026-09-08 — Ticket 05 Server Verifier model-stage wiring 原子切片（进行中）：
+>
+> 新增 `ChatVerifierStageService`，在 Worker 的 owner-bound Retriever projection 后按 `KNOWLEDGE_VERIFIER_MODEL_ENABLED` 接入
+> DeepSeek `deepseek-v4-pro` structured candidate；默认 gate-off 仍只运行 deterministic verifier。Live 配置复用严格的
+> `https://api.deepseek.com/v1`、知识专用 key 和 JSON contract，不读取 `.env`，本轮不调用 Provider。模型候选只消费 bounded chunks，
+> 结果仍由本地 safety/eligibility 约束；不可确认的 timeout/provider/schema 结果保留完整 stage hold，不把 0 usage 当作免费调用。
+>
+> Worker 不再用 WORKER reservation 预占全部输出额度，改为 0-token durable execution lease，让 Router/Verifier 等子 stage 从同一 ledger
+> 各自预留；新增 Worker 回归验证 Retriever chunks 经 Verifier 传给 generator。focused Worker `23/23`、Server build、lint 和 Prettier 通过。
+> 证据等级：`implemented + mock/static validated`；尚未执行 controlled-Live、产品真实模型 smoke 或 Docker 验收。功能分支待提交、推送、合并
+> `main` 后复验。
+
 > 2026-09-07 — Ticket 05 Server turn-bound stage runner 原子切片：
 >
 > 从 `main=d3fe9827` 建立 `drb/chat-budget-stage-runner`。新增 `ChatRunBudgetStageRunner`，由 Server 固定 owner、turn、policy、attempt，
