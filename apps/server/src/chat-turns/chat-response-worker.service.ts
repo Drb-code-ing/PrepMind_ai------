@@ -38,6 +38,7 @@ import {
   AgentBudgetDispatchError,
 } from '@repo/agent/chat-run-budget';
 import { ChatRouterStageService } from './chat-router-stage';
+import { ChatRetrieverStageService } from './chat-retriever-stage';
 
 export const CHAT_RESPONSE_GENERATOR = Symbol('CHAT_RESPONSE_GENERATOR');
 
@@ -133,6 +134,7 @@ export class ChatResponseWorkerService {
     @Optional() private readonly budgets?: ChatRunBudgetRepository,
     @Optional() private readonly budgetRunner?: ChatRunBudgetStageRunner,
     @Optional() private readonly routerStage?: ChatRouterStageService,
+    @Optional() private readonly retrieverStage?: ChatRetrieverStageService,
   ) {}
 
   async process(job: Job<unknown>): Promise<void> {
@@ -254,6 +256,15 @@ export class ChatResponseWorkerService {
             .filter((message) => message.role === 'USER')
             .at(-1)?.content ?? '',
         });
+        if (router && shouldRetrieveForRoute(router.route)) {
+          await this.retrieverStage?.run({
+            ownerId: turn.userId,
+            query:
+              messages
+                .filter((message) => message.role === 'USER')
+                .at(-1)?.content ?? '',
+          });
+        }
         const value = await this.generate(turn, messages, router?.route);
         validateGeneratedResult(value);
         return {
@@ -951,6 +962,10 @@ export class ChatResponseWorkerService {
     if (lastError instanceof Error) throw lastError;
     throw new Error('Chat response transaction retry exhausted');
   }
+}
+
+export function shouldRetrieveForRoute(route: RouterResult): boolean {
+  return route.name === 'rag_answer' && route.requiresRag;
 }
 
 export class ChatResponseWorkerError extends Error {
