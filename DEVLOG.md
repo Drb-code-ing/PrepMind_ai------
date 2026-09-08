@@ -42,6 +42,13 @@
 >
 > Worker/Retriever/module focused `28/28`、Server/Web build 和 `git diff --check` 通过；未读取凭据、未调用 Provider、未触碰项目 Docker/Redis/MinIO。
 
+> 2026-09-08 — Ticket 05 Worker deterministic Verifier wiring 原子切片：
+>
+> Worker 在 `rag_answer` 路径取得 Retriever 的 owner-bound chunks 后，调用 `verifyKnowledgeChunks` 生成受约束的 Verifier 结果，并将该结果作为
+> generator 的 typed input；非 RAG 路径不构造 Verifier 结果，检索失败保持 degraded。此切片只接 deterministic Verifier，不把它误写成真实模型调用或产品质量验收。
+>
+> Worker/Retriever/module focused `28/28`、Server/Web build 通过；未读取凭据、未调用 Provider、未触碰项目 Docker/Redis/MinIO。
+
 > 2026-09-07 — Ticket 05 隔离 PostgreSQL recovery 证据：
 >
 > Docker Desktop 恢复后执行 `bun --no-env-file apps/server/scripts/chat-run-budget-postgres-check.ts --run-isolated`，临时 tmpfs PostgreSQL 应用 20 个 migration，同机两个独立 PrismaClient 的跨 stage 上限、single dispatch winner、owner isolation、cancel race、active-turn guard、reserve crash replay、dispatch crash held 和 recovery settle-once 共 8 项检查全部通过（`passed=true`）。临时容器已停止并丢弃 tmpfs；项目容器、卷、Redis、MinIO 未触碰，未读取 `.env` 或调用 Provider。该回执补齐 Ticket 05 的真实数据库并发与子进程 post-commit crash/reconciliation 证据，但不覆盖多 Worker/跨主机/网络中断，也不证明真实模型或生产持续运行。
